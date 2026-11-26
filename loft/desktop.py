@@ -412,11 +412,35 @@ def make_app() -> FastAPI:
         c = client()
         return c.remove_member(team(c), uid)
 
+    @app.get("/api/rotate-key/preview")
+    def rotate_preview():
+        c = client()
+        return c.rotation_preview(team(c))
+
     @app.post("/api/rotate-key")
     def rotate_key():
         from .client import rotate_team_key
         c = client()
         return rotate_team_key(c, team(c), log=lambda m: None)
+
+    @app.get("/api/overview")
+    def overview():
+        c = client()
+        return c.overview(team(c))
+
+    @app.post("/api/backup")
+    def backup(body: dict):
+        from .engine import export_team
+        c = client()
+        blob = export_team(c, team(c), body["passphrase"], log=lambda m: None)
+        return Response(blob, media_type="application/octet-stream",
+                        headers={"Content-Disposition": 'attachment; filename="loft-team-backup.loftbackup"'})
+
+    @app.post("/api/restore")
+    def restore(body: dict):
+        from .engine import import_team
+        c = client()
+        return import_team(c, team(c), base64.b64decode(body["data"]), body["passphrase"], log=lambda m: None)
 
     @app.get("/api/audit")
     def audit():

@@ -110,3 +110,24 @@ def test_tls_self_signed_and_bind_rule(tmp_path):
         check_bind("0.0.0.0", tls=False, insecure=False)
     check_bind("0.0.0.0", tls=True, insecure=False)
     check_bind("127.0.0.1", tls=False, insecure=False)
+
+
+def test_dashboard_backup_restore_via_app(app):
+    t, server = app
+    signed_in(t, server)
+    t.post("/api/profiles", json={"name": "P", "os": "windows", "canvas": "noise", "proxy": "http://u:pw@1.1.1.1:8080"})
+    ov = t.get("/api/overview").json()
+    assert ov["profiles"] == 1 and ov["members"] == 1 and ov["key_epoch"] == 1
+    pv = t.get("/api/rotate-key/preview").json()
+    assert pv["profiles"] == 1 and pv["running"] == []
+    # backup -> restore into a second team through the desktop API
+    blob = t.post("/api/backup", json={"passphrase": "pw"}).content
+    assert blob[:4] == b"LFTT"
+    t.post("/api/teams", json={"name": "T2"})
+    import base64
+    out = t.post("/api/restore", json={"data": base64.b64encode(blob).decode(), "passphrase": "pw"}).json()
+    assert out["profiles"] == 1
+    names = [p["name"] for p in t.get("/api/state").json()["profiles"]]
+    assert names == ["P"]
+    # wrong passphrase is a clean 400
+    assert t.post("/api/restore", json={"data": base64.b64encode(blob).decode(), "passphrase": "no"}).status_code == 400

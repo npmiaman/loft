@@ -64,11 +64,11 @@ class LocalProfile:
 
     @property
     def version(self) -> int:
-        return json.loads(self.meta_path.read_text())["version"] if self.meta_path.exists() else -1
+        return json.loads(self.meta_path.read_text(encoding="utf-8"))["version"] if self.meta_path.exists() else -1
 
     def set_version(self, v: int) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        self.meta_path.write_text(json.dumps({"version": v}))
+        self.meta_path.write_text(json.dumps({"version": v}), encoding="utf-8")
 
 
 EXIT_IP_URLS = ("https://api64.ipify.org", "https://ifconfig.co/ip", "https://icanhazip.com")
@@ -161,7 +161,7 @@ def host_font_families() -> set[str]:
     cache = HOME / "host-fonts.json"
     try:
         if cache.exists() and time.time() - cache.stat().st_mtime < 86400:
-            return set(json.loads(cache.read_text()))
+            return set(json.loads(cache.read_text(encoding="utf-8")))
     except Exception:
         pass
     fams: set[str] = set()
@@ -191,7 +191,7 @@ def host_font_families() -> set[str]:
         return set()
     if fams:
         HOME.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(sorted(fams)))
+        cache.write_text(json.dumps(sorted(fams)), encoding="utf-8")
     return fams
 
 
@@ -205,8 +205,8 @@ def native_fonts(os_name: str) -> Optional[list[str]]:
     from importlib.resources import files
     key = {"macos": "mac", "windows": "win", "linux": "lin"}[os_name]
     data = files("camoufox")
-    known = set(json.loads((data / "fonts.json").read_text())[key])
-    essential = set(json.loads((data / "essential-fonts.json").read_text())[key])
+    known = set(json.loads((data / "fonts.json").read_text(encoding="utf-8"))[key])
+    essential = set(json.loads((data / "essential-fonts.json").read_text(encoding="utf-8"))[key])
     host = host_font_families()
     if not host:
         return None
@@ -512,6 +512,77 @@ def import_bundle(client: Client, tid: int, blob: bytes, passphrase: Optional[st
         finally:
             client.unlock(p["id"], lk)
     return client.profile(p["id"])
+
+
+# ---------------------------------------------------------------- team backup
+BACKUP_MAGIC = b"LFTT"
+
+
+def export_team(client: Client, tid: int, passphrase: str, log: Callable[[str], None] = print) -> bytes:
+    """One passphrase-encrypted archive of the whole team: every profile (settings,
+    fingerprint, proxy, latest browser data) and the templates. Restorable into any team.
+
+    A passphrase is required -- this file holds every logged-in session the team has."""
+    if not passphrase:
+        raise LoftError(400, "a team backup needs a passphrase (it contains every session)")
+    profiles = client.profiles(tid)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for i, p in enumerate(profiles, 1):
+            info = client.launch_info(p["id"])
+            manifest = {"name": info["name"], "os": info["os"], "notes": info["notes"], "tags": info["tags"],
+                        "start_url": info["start_url"], "canvas": info.get("canvas", "noise"),
+                        "fingerprint": info["fingerprint"], "proxy": info.get("proxy")}
+            z.writestr(f"profiles/{p['id']}/manifest.json", json.dumps(manifest))
+            if p["version"] > 0:
+                _, data = client.download(p["id"], tid=tid)
+                if data:
+                    z.writestr(f"profiles/{p['id']}/data.zip", data)
+            log(f"backed up profile {i}/{len(profiles)}: {info['name']}")
+        z.writestr("templates.json", json.dumps(client.templates(tid)))
+        z.writestr("backup.json", json.dumps({"format": "loft-team/1", "profiles": len(profiles),
+                                              "at": __import__("time").time()}))
+    salt = os.urandom(16)
+    return BACKUP_MAGIC + salt + crypto.encrypt(crypto.passphrase_key(passphrase, salt), buf.getvalue(), "backup")
+
+
+def import_team(client: Client, tid: int, blob: bytes, passphrase: str,
+                log: Callable[[str], None] = print) -> dict:
+    """Restore a team backup into team `tid`. Creates fresh profiles (new ids); does not delete
+    or merge existing ones. Templates are recreated. Returns a summary."""
+    if blob[:4] != BACKUP_MAGIC:
+        raise LoftError(400, "not a Loft team backup")
+    try:
+        raw = crypto.decrypt(crypto.passphrase_key(passphrase, blob[4:20]), blob[20:], "backup")
+    except Exception:
+        raise LoftError(400, "wrong passphrase")
+    created = []
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        names = z.namelist()
+        manifests = sorted(n for n in names if n.endswith("/manifest.json"))
+        for i, mp in enumerate(manifests, 1):
+            m = json.loads(z.read(mp))
+            p = client.create_profile(tid, name=m["name"], os=m["os"], notes=m.get("notes", ""),
+                                      tags=m.get("tags", []), start_url=m.get("start_url", ""),
+                                      canvas=m.get("canvas", "noise"), fingerprint=m["fingerprint"],
+                                      proxy=m.get("proxy"))
+            data_path = mp.rsplit("/", 1)[0] + "/data.zip"
+            if data_path in names:
+                lk = client.lock(p["id"])["lock"]
+                try:
+                    client.upload(p["id"], lk, 0, z.read(data_path), tid=tid)
+                finally:
+                    client.unlock(p["id"], lk)
+            created.append(p["id"])
+            log(f"restored profile {i}/{len(manifests)}: {m['name']}")
+        tmpls = 0
+        if "templates.json" in names:
+            existing = {t["name"] for t in client.templates(tid)}
+            for t in json.loads(z.read("templates.json")):
+                if t["name"] not in existing:
+                    client.add_template(tid, t["name"], t["settings"])
+                    tmpls += 1
+    return {"profiles": len(created), "profile_ids": created, "templates": tmpls}
 
 
 # ---------------------------------------------------------------- bulk

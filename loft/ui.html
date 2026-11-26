@@ -77,7 +77,7 @@ function render() {
   $("#app").innerHTML = `
   <header>
     <b>Loft</b>
-    <nav>${["profiles","team","activity"].map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</nav>
+    <nav>${["profiles","team","activity"].concat(canAdmin() ? ["overview"] : []).map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</nav>
     <span class="sp"></span>
     ${teams.length ? `<select style="width:auto" onchange="act(()=>api('POST','/team/'+this.value))">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
     <span class="mute small">${esc(S.me.email)} · ${esc(S.device)}</span>
@@ -94,7 +94,7 @@ function render() {
   $("#main").innerHTML = top + `<div id="body"></div>`;
   if (!teams.length) return renderNoTeam();
   if (!S.has_key) return;
-  ({profiles: renderProfiles, team: renderTeam, activity: renderActivity})[tab]();
+  ({profiles: renderProfiles, team: renderTeam, activity: renderActivity, overview: renderOverview}[tab] || renderProfiles)();
 }
 
 function renderLogin() {
@@ -336,8 +336,11 @@ async function renderTeam() {
       ${["member","admin"].concat(owner ? ["owner"] : []).map(r => `<option ${r===m.role?"selected":""}>${r}</option>`).join("")}</select>` : esc(m.role)}</td>
     <td style="text-align:right">${can ? `<button class="b d" onclick="removeMember(${m.id}, '${esc(m.email)}')">Remove</button>` : ""}</td></tr>`; }).join("")}
   </table></div>
-  ${admin ? `<div class="row" style="margin-top:8px"><button class="b" onclick="rotateKey()">Rotate team key</button>
-    <span class="mute small">New key; everything re-encrypted. People you removed can't open anything afterwards.</span></div>` : ""}
+  ${admin ? `<div class="row" style="margin-top:8px;flex-wrap:wrap">
+    <button class="b" onclick="rotateKey()">Rotate team key</button>
+    <button class="b" onclick="backupTeam()">Backup team</button>
+    <button class="b" onclick="restoreDlg()">Restore backup</button>
+    <span class="mute small">Rotate: new key, everything re-encrypted, removed people locked out. Backup: one passphrase-encrypted file of every profile.</span></div>` : ""}
 
   <div class="section"><h3>Templates</h3><p class="mute small">Starting settings for new profiles. Stored encrypted.</p>
   <div class="card"><table><tr><th>Name</th><th>Settings</th><th></th></tr>
@@ -364,12 +367,39 @@ async function removeMember(id, email) {
   await act(() => api("DELETE", `/members/${id}`));
   if (confirm(`${email} still holds the current team key. Rotate it now so they can't open anything? (Needs every profile stopped.)`)) rotateKey(true);
 }
-async function rotateKey(skipAsk) {
-  if (!skipAsk && !confirm("Rotate the team key? Every profile must be stopped. Large teams take a while.")) return;
+async function rotateKey() {
+  let pv;
+  try { pv = await api("GET", "/rotate-key/preview"); } catch (e) { alert(e.message); return; }
+  if (pv.running.length) { alert("Stop running profiles first: " + pv.running.map(r => `${r.name} (${r.device})`).join(", ")); return; }
+  let msg = `Rotate the team key?\n\n• re-encrypt ${pv.profiles} profile(s) and all templates\n• re-key ${pv.rekey.length} member(s): ${pv.rekey.map(m => m.email).join(", ") || "(none)"}\n• revoke ${pv.invites_to_revoke} unused invite(s)`;
+  if (pv.without_key.length) msg += `\n• LEAVE WITHOUT ACCESS (no keypair yet): ${pv.without_key.map(m => m.email).join(", ")} — they must be re-invited`;
+  if (!confirm(msg)) return;
   try { const r = await api("POST", "/rotate-key");
     alert(`Key rotated. ${r.rekeyed.length} members re-keyed, ${r.invites_revoked} unused invites revoked.` + (r.without_key.length ? ` ${r.without_key.length} member(s) need a new invite.` : ""));
     await load(); }
   catch (e) { alert(e.message); }
+}
+async function backupTeam() {
+  const pw = prompt("Passphrase for the backup (needed to restore it):"); if (!pw) return;
+  try { const r = await api("POST", "/backup", { passphrase: pw }, true);
+    save(await r.blob(), `loft-team-${S.team}.loftbackup`); }
+  catch (e) { alert(e.message); }
+}
+function restoreDlg() {
+  dlg(`<h3>Restore team backup</h3>
+    <p class="mute small">Adds the backup's profiles and templates to <b>this</b> team. It never deletes existing profiles.</p>
+    <input type="file" id="rb_file" accept=".loftbackup">
+    <label>Passphrase</label><input id="rb_pw" type="password">
+    <div class="row" style="margin-top:12px"><button class="b p" id="rb_go" onclick="restoreGo()">Restore</button><button class="b" onclick="close_()">Cancel</button></div>`);
+}
+async function restoreGo() {
+  const f = $("#rb_file").files[0]; if (!f) return;
+  const buf = new Uint8Array(await f.arrayBuffer()); let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  $("#rb_go").disabled = true; $("#rb_go").textContent = "Restoring…";
+  try { const r = await api("POST", "/restore", { data: btoa(bin), passphrase: $("#rb_pw").value });
+    close_(); await load(); alert(`Restored ${r.profiles} profile(s) and ${r.templates} template(s).`); }
+  catch (e) { $("#derr").textContent = e.message; $("#rb_go").disabled = false; $("#rb_go").textContent = "Restore"; }
 }
 function tplDlg() {
   dlg(`<h3>New template</h3><label>Name</label><input id="t_name">
@@ -390,6 +420,30 @@ async function renderActivity() {
   $("#body").innerHTML = `<div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>Profile</th><th>Detail</th></tr>
     ${rows.map(a => `<tr><td class="small">${new Date(a.at*1000).toLocaleString()}</td><td class="small">${esc(a.email)}</td>
       <td>${esc(a.action)}</td><td>${esc(name(a.profile_id))}</td><td class="small mute">${esc(a.detail)}</td></tr>`).join("")}</table></div>`;
+}
+
+async function renderOverview() {
+  if (!canAdmin()) { $("#body").innerHTML = `<p class="mute">Only owners and admins can see the dashboard.</p>`; return; }
+  let o;
+  try { o = await api("GET", "/overview"); } catch (e) { $("#body").innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  const mb = (o.bytes / (1024 * 1024)).toFixed(1);
+  const tile = (label, value, sub) => `<div class="card pad" style="min-width:150px"><div class="mute small">${label}</div><div style="font-size:26px;font-weight:600">${value}</div>${sub ? `<div class="mute small">${sub}</div>` : ""}</div>`;
+  $("#body").innerHTML = `
+  <div class="row" style="flex-wrap:wrap;gap:12px">
+    ${tile("Profiles", o.profiles)}
+    ${tile("Members", o.members, o.members_without_key.length ? `${o.members_without_key.length} without a key` : "all have keys")}
+    ${tile("Running now", o.running.length)}
+    ${tile("Stored data", mb + " MB", o.versions + " snapshots")}
+    ${tile("Open invites", o.open_invites)}
+    ${tile("Key epoch", o.key_epoch, o.rotating ? "rotating…" : (o.last_rotation ? "rotated " + new Date(o.last_rotation*1000).toLocaleDateString() : "never rotated"))}
+  </div>
+  ${o.members_without_key.length ? `<div class="banner" style="margin-top:14px"><div><b>${o.members_without_key.length} member(s) have no encryption key.</b> <span class="mute">${o.members_without_key.map(esc).join(", ")} — they can't open profiles. After they sign in once, rotate the key to grant access.</span></div></div>` : ""}
+  <div class="section"><h3>Running now</h3><div class="card"><table><tr><th>Profile</th><th>Who</th><th>Device</th></tr>
+    ${o.running.map(r => `<tr><td>${esc(r.name)}</td><td class="small">${esc(r.email)}</td><td class="small">${esc(r.device)}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">Nothing running.</td></tr>`}
+  </table></div></div>
+  <div class="section"><h3>Recent activity</h3><div class="card"><table>
+    ${o.recent.map(a => `<tr><td class="small mute" style="width:150px">${new Date(a.at*1000).toLocaleString()}</td><td class="small">${esc(a.email || "-")}</td><td>${esc(a.action)}</td><td class="small mute">${esc(a.detail)}</td></tr>`).join("")}
+  </table></div><div class="row" style="margin-top:8px"><button class="b" onclick="tab='activity';render()">Full activity log</button></div></div>`;
 }
 
 load().catch(e => { $("#app").innerHTML = `<p class="err" style="padding:20px">${esc(e.message)}</p>`; });

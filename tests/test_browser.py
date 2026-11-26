@@ -191,8 +191,8 @@ def test_native_profile_shows_host_fonts_camoufox_would_hide():
     from loft.engine import default_canvas, host_font_families, native_fonts
     host = host_os()
     key = {"macos": "mac", "windows": "win", "linux": "lin"}[host]
-    essential = set(json.loads((files("camoufox") / "essential-fonts.json").read_text())[key])
-    known = set(json.loads((files("camoufox") / "fonts.json").read_text())[key])
+    essential = set(json.loads((files("camoufox") / "essential-fonts.json").read_text(encoding="utf-8"))[key])
+    known = set(json.loads((files("camoufox") / "fonts.json").read_text(encoding="utf-8"))[key])
     installed_known = host_font_families() & known
     fonts = set(native_fonts(host) or [])
     # The invariant: every installed font Camoufox knows about is claimed, and the

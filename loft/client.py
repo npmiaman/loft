@@ -235,6 +235,12 @@ class Client:
     def audit(self, tid: int, limit: int = 100) -> list:
         return self.j("GET", f"/teams/{tid}/audit", params={"limit": limit})
 
+    def rotation_preview(self, tid: int) -> dict:
+        return self.j("GET", f"/teams/{tid}/rotation/preview")
+
+    def overview(self, tid: int) -> dict:
+        return self.j("GET", f"/teams/{tid}/overview")
+
     # ------------------------------------------------------------ profiles
     def profiles(self, tid: int) -> list:
         return [self._profile(p) for p in self.j("GET", f"/teams/{tid}/profiles")]

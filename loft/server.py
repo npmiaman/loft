@@ -387,6 +387,34 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             audit(con, tid, user["id"], "member.removed", detail=f"user {uid}")
         return {"ok": True, "rotate_recommended": True}
 
+    @app.get("/teams/{tid}/overview")
+    def overview(tid: int, user=Depends(current_user)):
+        """Admin dashboard: counts, storage, who is running what, key-health, rotation status."""
+        now = time.time()
+        with db.tx() as con:
+            need_role(con, tid, user, "owner", "admin")
+            t = team_row(con, tid)
+            profiles = con.execute("SELECT COUNT(*) c FROM profiles WHERE team_id=? AND deleted=0", (tid,)).fetchone()["c"]
+            members = con.execute("SELECT COUNT(*) c FROM members WHERE team_id=?", (tid,)).fetchone()["c"]
+            no_key = con.execute("SELECT u.email FROM members m JOIN users u ON u.id=m.user_id "
+                                 "WHERE m.team_id=? AND u.pubkey IS NULL", (tid,)).fetchall()
+            store = con.execute("SELECT COUNT(*) n, COALESCE(SUM(v.size),0) b FROM versions v "
+                                "JOIN profiles p ON p.id=v.profile_id WHERE p.team_id=?", (tid,)).fetchone()
+            running = [dict(r) for r in con.execute(
+                "SELECT p.name, p.id, l.device, u.email, l.expires FROM locks l JOIN profiles p ON p.id=l.profile_id "
+                "JOIN users u ON u.id=l.user_id WHERE p.team_id=? AND l.expires>? ORDER BY p.name", (tid, now))]
+            invites = con.execute("SELECT COUNT(*) c FROM invites WHERE team_id=? AND used_by IS NULL AND expires>?",
+                                  (tid, now)).fetchone()["c"]
+            last_rot = con.execute("SELECT MAX(at) a FROM audit WHERE team_id=? AND action='team.key_rotated'",
+                                   (tid,)).fetchone()["a"]
+            recent = [dict(r) for r in con.execute(
+                "SELECT a.action, a.detail, a.at, u.email FROM audit a LEFT JOIN users u ON u.id=a.user_id "
+                "WHERE a.team_id=? ORDER BY a.id DESC LIMIT 8", (tid,))]
+        return {"profiles": profiles, "members": members, "members_without_key": [r["email"] for r in no_key],
+                "versions": store["n"], "bytes": store["b"], "running": running, "open_invites": invites,
+                "key_epoch": t["key_epoch"], "rotating": t["rotating_by"] is not None,
+                "last_rotation": last_rot, "recent": recent}
+
     @app.get("/teams/{tid}/audit")
     def get_audit(tid: int, limit: int = 200, user=Depends(current_user)):
         with db.tx() as con:
@@ -660,6 +688,27 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
         if epoch is not None and t["rotating_epoch"] != epoch:
             raise HTTPException(409, "rotation epoch mismatch")
         return t
+
+    @app.get("/teams/{tid}/rotation/preview")
+    def rotation_preview(tid: int, user=Depends(current_user)):
+        """What a key rotation would do, without starting it (read-only)."""
+        now = time.time()
+        with db.tx() as con:
+            need_role(con, tid, user, "owner", "admin")
+            profiles = con.execute("SELECT COUNT(*) c FROM profiles WHERE team_id=? AND deleted=0", (tid,)).fetchone()["c"]
+            mems = [dict(r) for r in con.execute(
+                "SELECT u.id user_id, u.email, (u.pubkey IS NOT NULL) has_key FROM members m JOIN users u "
+                "ON u.id=m.user_id WHERE m.team_id=? ORDER BY u.email", (tid,))]
+            invites = con.execute("SELECT COUNT(*) c FROM invites WHERE team_id=? AND used_by IS NULL AND expires>?",
+                                  (tid, now)).fetchone()["c"]
+            running = [dict(r) for r in con.execute(
+                "SELECT p.name, l.device FROM locks l JOIN profiles p ON p.id=l.profile_id "
+                "WHERE p.team_id=? AND l.expires>?", (tid, now))]
+            epoch = team_row(con, tid)["key_epoch"]
+        return {"epoch": epoch, "profiles": profiles,
+                "rekey": [m for m in mems if m["has_key"] and m["user_id"] != user["id"]],
+                "without_key": [m for m in mems if not m["has_key"] and m["user_id"] != user["id"]],
+                "invites_to_revoke": invites, "running": running}
 
     @app.post("/teams/{tid}/rotation/start")
     def rotation_start(tid: int, user=Depends(current_user)):

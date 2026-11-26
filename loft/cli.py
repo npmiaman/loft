@@ -206,6 +206,12 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("file")
     ip.add_argument("--name")
 
+    bk = sub.add_parser("backup", help="admin: encrypted backup of the whole team to a file")
+    bk.add_argument("file")
+    rs = sub.add_parser("restore", help="restore a team backup into the current team (adds profiles)")
+    rs.add_argument("file")
+    sub.add_parser("overview", help="admin dashboard: counts, storage, who's running, key health")
+
     tp = sub.add_parser("template", help="template ls | add NAME [opts] | rm ID")
     tp.add_argument("action", choices=["ls", "add", "rm"])
     tp.add_argument("value", nargs="?")
@@ -456,10 +462,47 @@ def main(argv=None) -> None:
             print("ok")
     elif args.cmd == "rotate-key":
         from .client import rotate_team_key
+        pv = c.rotation_preview(tid)
+        if pv["running"]:
+            raise SystemExit("stop running profiles first: " +
+                             ", ".join(f"{r['name']} ({r['device']})" for r in pv["running"]))
+        print(f"Rotating the key for team {tid} will:")
+        print(f"  - re-encrypt {pv['profiles']} profile(s) and all templates")
+        print(f"  - re-key {len(pv['rekey'])} member(s): {', '.join(m['email'] for m in pv['rekey']) or '(none)'}")
+        print(f"  - revoke {pv['invites_to_revoke']} unused invite(s)")
+        if pv["without_key"]:
+            print(f"  - LEAVE WITHOUT ACCESS (no keypair yet): {', '.join(m['email'] for m in pv['without_key'])}")
+            print("    (they must be re-invited after rotation)")
+        if input("Proceed? [y/N] ").strip().lower() != "y":
+            raise SystemExit("aborted")
         out = rotate_team_key(c, tid)
-        print(f"re-keyed {len(out['rekeyed'])} members; {out['invites_revoked']} unused invites revoked")
+        print(f"done: re-keyed {len(out['rekeyed'])} members; {out['invites_revoked']} unused invites revoked")
         if out["without_key"]:
-            print(f"no key for users {out['without_key']} (no keypair yet): they must be re-invited")
+            print(f"no key for users {out['without_key']}: re-invite them")
+    elif args.cmd == "backup":
+        from .engine import export_team
+        pw = getpass.getpass("backup passphrase: ")
+        if pw != getpass.getpass("again: "):
+            raise SystemExit("passphrases differ")
+        Path(args.file).write_bytes(export_team(c, tid, pw))
+        Path(args.file).chmod(0o600)
+        print(f"wrote {args.file}")
+    elif args.cmd == "restore":
+        from .engine import import_team
+        pw = getpass.getpass("backup passphrase: ")
+        out = import_team(c, tid, Path(args.file).read_bytes(), pw)
+        print(f"restored {out['profiles']} profile(s) and {out['templates']} template(s) into team {tid}")
+    elif args.cmd == "overview":
+        o = c.overview(tid)
+        mb = o["bytes"] / (1024 * 1024)
+        print(f"Team {tid}  (key epoch {o['key_epoch']}{', ROTATING' if o['rotating'] else ''})")
+        print(f"  profiles: {o['profiles']}   members: {o['members']}   open invites: {o['open_invites']}")
+        print(f"  storage:  {o['versions']} snapshots, {mb:.1f} MB")
+        print(f"  running:  " + (", ".join(f"{r['name']} ({r['email']} @ {r['device']})" for r in o["running"]) or "none"))
+        if o["members_without_key"]:
+            print(f"  NO KEY:   {', '.join(o['members_without_key'])} (can't open profiles; re-invite)")
+        if o["last_rotation"]:
+            print(f"  last key rotation: {time.strftime('%Y-%m-%d %H:%M', time.localtime(o['last_rotation']))}")
     elif args.cmd == "cloud":
         from .runner import start_cloud_session
         out = start_cloud_session(c, args.id, _runner(c, tid, args.runner))

@@ -338,3 +338,60 @@ def test_concurrent_lock_has_one_winner(mk):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert len(wins) == 1 and losses == [409] * 11
+
+
+# ---------------------------------------------------------------- team backup / dashboard
+from loft.engine import export_team, import_team  # noqa: E402
+
+
+def test_team_backup_restore_roundtrip(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p1 = owner.create_profile(tid, name="A", os="windows", canvas="noise",
+                              proxy={"server": "http://h:1", "username": "u", "password": "PW"}, fingerprint=FP)["id"]
+    owner.create_profile(tid, name="B", os="macos", canvas="noise", fingerprint={"navigator": {"userAgent": "B"}, "os": "macos"})
+    lk = owner.lock(p1)["lock"]
+    owner.upload(p1, lk, 0, b"A-SESSION")
+    owner.unlock(p1, lk)
+    owner.add_template(tid, "tpl", {"os": "windows"})
+
+    blob = export_team(owner, tid, "backup pass", log=lambda m: None)
+    assert blob[:4] == b"LFTT" and b"A-SESSION" not in blob and b"PW" not in blob
+
+    dest = owner.create_team("Restored")["id"]
+    with pytest.raises(LoftError, match="wrong passphrase"):
+        import_team(owner, dest, blob, "nope", log=lambda m: None)
+    out = import_team(owner, dest, blob, "backup pass", log=lambda m: None)
+    assert out["profiles"] == 2 and out["templates"] == 1
+    names = {p["name"]: p for p in owner.profiles(dest)}
+    assert set(names) == {"A", "B"}
+    assert owner.launch_info(names["A"]["id"])["proxy"]["password"] == "PW"
+    assert owner.download(names["A"]["id"])[1] == b"A-SESSION"
+    assert owner.launch_info(names["B"]["id"])["os"] == "macos"
+
+
+def test_rotation_preview_and_overview(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p = owner.create_profile(tid, name="x", fingerprint=FP)["id"]
+    lk = owner.lock(p)["lock"]
+    owner.upload(p, lk, 0, b"DATA")
+    owner.unlock(p, lk)
+    owner.invite(tid)  # one open invite
+
+    pv = owner.rotation_preview(tid)
+    assert pv["profiles"] == 1 and pv["invites_to_revoke"] == 1
+    assert {m["email"] for m in pv["rekey"]} == {"admin@x.io", "mem@x.io"} and pv["without_key"] == []
+
+    ov = owner.overview(tid)
+    assert ov["profiles"] == 1 and ov["members"] == 3 and ov["versions"] == 1 and ov["bytes"] >= 4
+    assert ov["open_invites"] == 1 and ov["key_epoch"] == 1 and ov["members_without_key"] == []
+    assert any(a["action"] == "profile.synced" for a in ov["recent"])
+    # a member can't see the dashboard or preview
+    for call in (lambda: member.overview(tid), lambda: member.rotation_preview(tid)):
+        with pytest.raises(LoftError) as e:
+            call()
+        assert e.value.status == 403
+    # running profile shows up and blocks rotation preview's "running" list
+    lk = admin.lock(p)["lock"]
+    assert owner.overview(tid)["running"][0]["name"] == "x"
+    assert owner.rotation_preview(tid)["running"][0]["device"]
+    admin.unlock(p, lk)
