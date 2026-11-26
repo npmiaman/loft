@@ -1,66 +1,159 @@
 # Loft
 
-Team browser profiles on [Camoufox](https://github.com/daijro/camoufox). Each profile is a separate browser identity: one fingerprint for its whole life, its own cookies and storage, and an optional proxy. Profiles live on a server you host, so a team can share them, and only one person can run a given profile at a time.
+Team browser profiles on [Camoufox](https://github.com/daijro/camoufox), a Firefox build with fingerprint injection. Each profile is its own browser identity:
+- one fingerprint for its whole life
+- its own cookies and storage
+- an optional proxy
 
-The design follows Donut Browser (profile list, per-profile fingerprint and proxy), but none of its code is used, so the AGPL does not apply. Camoufox is MPL-2.0.
+Profiles sync through a server you host. They are end-to-end encrypted, shared with your team by role, and can be run locally or on a cloud runner that you view from any browser or phone.
 
-## Parts
+The design follows Donut Browser, but none of its code is used, so the AGPL doesn't apply. Camoufox is MPL-2.0.
+
+## What's in it
 
 | | |
 |---|---|
-| `loft/server.py` | Cloud server (FastAPI). Users, teams, roles, invites, folders, profiles, per-profile sharing, run locks, versioned profile-data sync, audit log. SQLite plus a blob directory. |
-| `loft/engine.py` | Local side. Generates a fingerprint (BrowserForge via Camoufox), packs and unpacks the Firefox profile directory (caches skipped, zip-slip guarded), and runs lock → pull → launch → wait for close → push → unlock. |
-| `loft/desktop.py` + `ui.html` | Desktop app: a web UI bound to 127.0.0.1. Each profile launches as its own subprocess. |
-| `loft/cli.py` | The same features from the terminal. |
+| **Profiles** | Stable fingerprint per profile (Camoufox/BrowserForge), proxy per profile with timezone, locale and geolocation matched to the exit IP, start URL, tags, notes, canvas mode |
+| **Teams** | Owner / admin / member roles; per-profile sharing at `run` or `edit`; invites; audit log |
+| **Sync** | Encrypted, versioned (last 5 kept); a run lock lets one person use a profile at a time; heartbeat, auto-expiry, admin force-unlock |
+| **Encryption** | AES-256-GCM with a team key that only clients hold. The server stores only ciphertext of fingerprints, proxies, templates, runner keys and browser data. |
+| **Bulk / templates** | Create up to 500 profiles in one go, with proxies assigned round-robin. Templates (encrypted) hold starting settings. |
+| **Import / export** | `.loftprofile` bundles (fingerprint, proxy, cookies, storage), passphrase-encrypted by default |
+| **Cookies** | Import Playwright JSON, Cookie-Editor or EditThisCookie JSON, or Netscape `cookies.txt`; export as JSON |
+| **Cloud run** | `loft runner serve` on any server. Profiles run there headless and stream to a viewer page that works on desktop and mobile: click, scroll, type, URL bar, tabs. |
+| **Automation** | A local REST API (`/v1`, with an API key) and a Python SDK that gives you a live Playwright context |
+| **TLS** | `--self-signed` or `--tls-cert/--tls-key`, client CA pinning, and plain HTTP refused on non-local addresses. There's also a Caddy config for real certificates. |
+| **Desktop app** | A native window (pywebview) built with PyInstaller for macOS, Windows and Linux |
 
-## Quick start
-
-```bash
-uv sync
-uv run python -m camoufox fetch          # ~1.3 GB browser download, one time
-
-uv run loft server                        # cloud server on :4400 (data in ~/.loft-server)
-uv run loft app                           # desktop app on :4410
-```
-
-From the CLI:
+## Quick start (from source)
 
 ```bash
-uv run loft register you@team.com --server http://127.0.0.1:4400   # the first user needs no invite
-uv run loft team create "My team"
-uv run loft new "Client A" --os windows --proxy http://user:pass@1.2.3.4:8080 --start-url https://example.com
-uv run loft ls
-uv run loft run 1                         # opens the browser; syncs when you close the window
-uv run loft invite --role member          # give the code to a teammate
-uv run loft share 1 teammate@team.com --level run
-uv run loft audit
+uv sync --extra desktop
+uv run loft fetch-browser                 # Camoufox, ~1.3 GB, one time
+
+uv run loft server                        # cloud server on 127.0.0.1:4400
+uv run loft app                           # desktop app (native window)
 ```
 
-A teammate runs `loft register them@team.com --server URL --invite CODE`. After that, `loft run 1` on their machine pulls the latest data and opens the same identity.
+On a real server:
 
-## Model
+```bash
+uv run loft server --host 0.0.0.0 --self-signed loft.mycompany.com   # prints the cert path to give clients
+# or put deploy/Caddyfile in front of a 127.0.0.1 bind for a Let's Encrypt cert
+```
 
-- **Roles.** `owner` > `admin` > `member`. Owners and admins see every profile in the team. Members see only profiles they created or that were shared with them. Admins invite people, change roles (except owner), read the audit log, and force-release stuck locks. A team always keeps at least one owner.
-- **Share levels.** `run` opens the profile; the proxy password is hidden in listings but sent to the launcher. `edit` also allows changing settings and sharing.
-- **Run lock.** Taken at launch and held by a heartbeat every 30 s, with a 120 s TTL. A second person gets "in use by X on device Y". If a laptop dies mid-session, the lock expires on its own, or an admin can force-release it.
-- **Sync.** An upload needs the lock and the current base version, otherwise you get 409/423 and a local `unsynced-N.zip` is kept. The server keeps the last 5 snapshots (`loft versions ID`).
-- **Fingerprint.** Generated once at creation and stored on the server. Each launch passes the same fingerprint to Camoufox, so the UA, screen, WebGL, fonts and canvas seed stay the same on every machine. With a proxy, `geoip` sets timezone, locale and geolocation to match the proxy's exit IP.
-- **Signup.** Invite-only after the first user. Set `LOFT_OPEN_SIGNUP=1` only for local testing.
+## CLI
+
+```bash
+loft register you@team.com --server https://loft.mycompany.com [--ca cert.pem]   # first user: no invite needed
+loft team create "Agency"
+loft invite --role member                 # prints code.key: send it privately, it carries the team key
+loft register them@team.com --server URL --invite CODE.KEY
+
+loft new "Client A" --os windows --proxy http://user:pass@1.2.3.4:8080 --start-url https://example.com
+loft bulk 50 --name "Store {n}" --os windows --proxies proxies.txt --tag stores
+loft template add "US desktop" --os windows --proxy http://u:p@us.proxy:8000 --tag us
+loft new "Client B" --template "US desktop"
+loft ls
+loft run 1                                # window opens; close it (or Ctrl+C) and it syncs
+loft share 1 them@team.com --level run
+loft cookies import 1 cookies.txt
+loft cookies export 1 out.json
+loft export 1 client-a.loftprofile        # asks for a passphrase
+loft import client-a.loftprofile --name "Client A copy"
+loft audit
+```
+
+## Cloud runners
+
+```bash
+# on the runner machine (needs Camoufox installed):
+loft runner serve --host 0.0.0.0 --self-signed runner-1.mycompany.com     # prints a runner key
+# an admin registers it (the key is stored encrypted with the team key):
+loft runner add eu-1 https://runner-1.mycompany.com:4420 RUNNER_KEY
+# anyone with access to a profile:
+loft cloud 12                             # prints a viewer link; open it on any device
+```
+
+To start a session, the client sends the runner its Loft token and the team key, over TLS. The runner then does what a desktop would: lock, pull, decrypt, run, and sync when stopped. Decrypted data lives in a temp folder that is deleted when the session ends. The viewer link holds a per-session secret, so treat it like a password.
+
+## Automation
+
+Local REST API, served by the desktop app (`loft app --no-window` runs it without a window):
+
+```bash
+KEY=$(loft apikey)
+curl -H "X-API-Key: $KEY" http://127.0.0.1:4410/v1/profiles
+curl -H "X-API-Key: $KEY" -X POST -d '{"name":"api","os":"windows"}' -H 'Content-Type: application/json' http://127.0.0.1:4410/v1/profiles
+curl -H "X-API-Key: $KEY" -X POST -d '{"headless":true}' -H 'Content-Type: application/json' http://127.0.0.1:4410/v1/profiles/3/start
+curl -H "X-API-Key: $KEY" http://127.0.0.1:4410/v1/profiles/3/status
+curl -H "X-API-Key: $KEY" -X POST http://127.0.0.1:4410/v1/profiles/3/stop        # closes and syncs
+```
+
+The other endpoints are `POST /v1/profiles/bulk`, `PATCH`/`DELETE /v1/profiles/{id}`, `GET`/`POST /v1/profiles/{id}/cookies`, and `POST /v1/profiles/{id}/cloud`.
+
+Python SDK, with full Playwright control:
+
+```python
+from loft.client import Client
+from loft.engine import open_profile
+
+with open_profile(Client(persist=True), 3, headless=True) as ctx:
+    page = ctx.new_page()
+    page.goto("https://example.com")
+# closed, synced and unlocked here, even if the script raised
+```
+
+`loft exec 3 script.py` runs a script with `context` already set.
+
+Selenium and Puppeteer aren't supported. They drive Chromium through its debugging protocol, and Camoufox is Firefox, controlled through Playwright.
+
+## Model and limits
+
+- **Roles.** Owners and admins see every profile. Members see only profiles they made or that are shared with them. Only owners and admins can invite, change roles, manage templates and runners, read the audit log, and force-unlock. A team always keeps at least one owner.
+- **Encryption scope.** Profile names, notes, tags, OS and the audit log are readable by the server; everything sensitive is ciphertext. Every team member holds the key, so `run` versus `edit` is enforced by the server, not by cryptography. Removing a member doesn't change the key; **key rotation isn't built yet**.
+- **Canvas.** These results come from runs on this Mac:
+  - `noise` (the default) makes canvas and WebGL readback random on every read. It works for any claimed OS, and profiles can't be linked by canvas, but a site sees a privacy-hardened Firefox (like Tor Browser or LibreWolf).
+  - `real` uses this machine's actual rendering, which is stable within a session, and only works when the profile's OS matches the machine. On web pages it changed between launches; I haven't confirmed why.
+- **Engine.** Firefox only. There is no Chromium engine: no open-source fingerprint-patched Chromium with a license you can build a product on turned up, and GoLogin's Orbita is closed and its terms forbid reuse.
+- **Fingerprint quality hasn't been measured** against CreepJS, BrowserScan or Pixelscan yet. Don't assume it passes them.
+- **Cookies.** Expiry dates more than 399 days out are clamped, because Firefox silently drops them.
 
 ## Tests
 
 ```bash
-uv run pytest -q
+uv run pytest -q          # 28 tests; the browser ones need Camoufox installed
 ```
 
-- `test_server.py`: roles, visibility, sharing, locks, sync and versions, audit, packing.
-- `test_desktop.py`: the local UI API, including blocking foreign hosts and requests without the `X-Loft` header.
-- `test_browser.py`: real Camoufox, headless. Two simulated devices share one profile; checks that the cookie and localStorage survive and the fingerprint is the same, and that a second profile's fingerprint differs.
+| File | Covers |
+|---|---|
+| `test_server.py` | roles, visibility, sharing, locks, sync and versions, audit, ciphertext-only storage, key recovery on a new device, invites without the key part, encrypted templates and runners |
+| `test_desktop.py` | the UI API, the local-only guard, bulk create, templates, the `/v1` API key, the TLS cert and bind rule |
+| `test_browser.py` | real Camoufox: two devices share one identity (cookies, storage, fingerprint), canvas modes, cookie import and export, bundle round-trip, a crashing script still syncs |
+| `test_runner.py` | real Camoufox cloud session: JPEG frames over websocket, typing reaches the page and syncs, temp data deleted |
 
-## Not built yet
+**Checked by hand on macOS:**
+- A TLS server with a self-signed cert: plain HTTP refused, untrusted cert rejected, pinned CA works.
+- The `/v1` start and stop: it syncs.
+- Ctrl+C on `loft run`: it syncs.
+- The PyInstaller `Loft.app` (208 MB) driving a profile through its own API.
 
-- **Encryption at rest.** Profile archives contain session cookies, and proxy passwords are stored in plain text in SQLite. Client-side encryption with a team key is next.
-- **Postgres and S3 backends.** The `_db()` and `BlobStore` seams are there.
-- **TLS.** Put the server behind Caddy or nginx before exposing it beyond localhost.
-- **Folders.** Supported in the API, not shown in the UI.
-- **Bulk create and import/export, a public automation API with API keys, rollback to a snapshot from the UI, a native desktop shell (Tauri).**
+**Not checked:**
+- The pywebview window, by eye.
+- The Windows and Linux builds. `.github/workflows/desktop.yml` builds all three, but it only runs manually or on a `v*` tag, because it uses Actions minutes.
+- A real VPS deployment.
+- Real proxies.
+
+## Layout
+
+```
+loft/server.py    cloud server (FastAPI, SQLite + BlobStore; Postgres/S3 not built)
+loft/client.py    API client, config, team-key vault, client-side encryption
+loft/crypto.py    AES-GCM, scrypt
+loft/engine.py    fingerprints, pack/unpack, open_profile/run_profile, cookies, bundles, bulk
+loft/runner.py    cloud runner; viewer.html is its streaming page
+loft/desktop.py   desktop app backend (UI API + /v1); ui.html is the UI
+loft/cli.py       CLI
+loft/tls.py       self-signed certs, bind rule
+packaging/        PyInstaller spec    deploy/   Caddyfile    .github/workflows/desktop.yml
+```

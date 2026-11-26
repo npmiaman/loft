@@ -1,0 +1,39 @@
+name: desktop builds
+# Manual or on a version tag only: each run uses Actions minutes.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            extras: --extra desktop --extra build
+            artifact: Loft-macos-arm64
+          - os: windows-latest
+            extras: --extra desktop --extra build
+            artifact: Loft-windows-x64
+          - os: ubuntu-22.04
+            extras: --extra build   # no native window on Linux builds: the app opens the system browser
+            artifact: Loft-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync ${{ matrix.extras }}
+      - run: uv run pytest -q tests/test_server.py tests/test_desktop.py
+      - run: uv run pyinstaller packaging/loft.spec --noconfirm --distpath dist --workpath build
+      - name: smoke test the frozen binary
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then B=dist/Loft.app/Contents/MacOS/Loft; elif [ "$RUNNER_OS" = "Windows" ]; then B=dist/Loft/Loft.exe; else B=dist/Loft/Loft; fi
+          "$B" --help | head -5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          retention-days: 14
