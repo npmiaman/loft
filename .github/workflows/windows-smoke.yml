@@ -1,0 +1,41 @@
+name: windows smoke
+# Confirms Loft installs, syncs, locks and runs a real browser profile on
+# Windows, and that Windows font enumeration works. Manual only (fetches the
+# ~1.3 GB Camoufox browser, so it is not run on every push).
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install (client extra = browser)
+        run: uv sync --extra client
+
+      # Server + desktop logic is platform-agnostic but worth confirming on Windows
+      # (paths, sqlite, the TLS self-signed cert, the /v1 API).
+      - name: Server and desktop tests
+        run: uv run pytest -q tests/test_server.py tests/test_desktop.py -k "not postgres"
+
+      - name: Windows font enumeration works
+        run: >
+          uv run python -c "from loft.engine import host_font_families;
+          f = host_font_families();
+          assert 'Arial' in f and 'Segoe UI' in f, sorted(f)[:20];
+          print('host fonts:', len(f))"
+
+      - name: Fetch Camoufox browser
+        run: uv run loft fetch-browser
+
+      # The real browser path on Windows: two devices share one identity
+      # (cookies + storage + fingerprint), cookie import/export, bundle
+      # round-trip, crash-still-syncs, and the native-font allowlist.
+      - name: Browser tests (real Camoufox, headless)
+        run: uv run pytest -q tests/test_browser.py
+
+      - name: Cloud runner test (real Camoufox)
+        run: uv run pytest -q tests/test_runner.py

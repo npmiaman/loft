@@ -193,7 +193,12 @@ def test_native_profile_shows_host_fonts_camoufox_would_hide():
     key = {"macos": "mac", "windows": "win", "linux": "lin"}[host]
     essential = set(json.loads((files("camoufox") / "essential-fonts.json").read_text())[key])
     known = set(json.loads((files("camoufox") / "fonts.json").read_text())[key])
-    hidden = (host_font_families() & known) - essential
+    installed_known = host_font_families() & known
     fonts = set(native_fonts(host) or [])
-    assert hidden and hidden <= fonts, "every installed system font must be claimed"
+    # The invariant: every installed font Camoufox knows about is claimed, and the
+    # essential floor is included. (On a bare CI Windows image the "hidden" set -
+    # installed minus essential - may be empty; on a real desktop it is not. The
+    # bug was that native_fonts omitted installed-but-non-essential fonts.)
+    assert installed_known <= fonts, sorted(installed_known - fonts)[:20]
+    assert essential & known <= fonts
     assert default_canvas(host) == "real" and default_canvas("windows" if host != "windows" else "macos") == "noise"
