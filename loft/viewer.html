@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Loft · cloud profile</title>
+<style>
+  :root { --bg:#0f1115; --bar:#171a21; --ink:#e7e9ee; --mute:#9aa1ad; --line:#272b35; --acc:#5b8cff; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .bar { display:flex; gap:6px; align-items:center; padding:6px 8px; background:var(--bar); border-bottom:1px solid var(--line); }
+  button { font:inherit; background:#22262f; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:5px 9px; cursor:pointer; min-width:34px; }
+  button.stop { color:var(--bad); }
+  input { font:inherit; flex:1; min-width:0; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  .tabs { display:flex; gap:4px; overflow-x:auto; padding:4px 8px; background:var(--bar); border-bottom:1px solid var(--line); }
+  .tab { white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis; font-size:12px; padding:3px 8px; border-radius:6px; border:1px solid var(--line); cursor:pointer; color:var(--mute); }
+  .tab.on { color:var(--ink); border-color:var(--acc); }
+  #stage { position:relative; height:calc(100% - 120px); overflow:auto; display:flex; justify-content:center; align-items:flex-start; outline:none; }
+  #screen { max-width:100%; height:auto; touch-action:pan-y; user-select:none; -webkit-user-select:none; cursor:default; }
+  #status { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--mute); }
+  .kb { display:flex; gap:6px; padding:6px 8px; background:var(--bar); border-top:1px solid var(--line); position:fixed; bottom:0; left:0; right:0; }
+  .name { color:var(--mute); font-size:12px; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button onclick="send({t:'back'})" title="Back">‹</button>
+  <button onclick="send({t:'forward'})" title="Forward">›</button>
+  <button onclick="send({t:'reload'})" title="Reload">⟳</button>
+  <input id="url" placeholder="Type a URL and press Enter" autocapitalize="off" autocorrect="off" spellcheck="false">
+  <span class="name" id="name"></span>
+  <button class="stop" onclick="stopSession()" title="Close and sync">Stop</button>
+</div>
+<div class="tabs" id="tabs"></div>
+<div id="stage" tabindex="0"><img id="screen" alt=""><div id="status">Connecting…</div></div>
+<div class="kb">
+  <input id="txt" placeholder="Type here, then Send (for phones)" autocapitalize="off">
+  <button onclick="sendText()">Send</button>
+  <button onclick="send({t:'key',key:'Enter'})">⏎</button>
+  <button onclick="send({t:'key',key:'Backspace'})">⌫</button>
+  <button onclick="send({t:'key',key:'Tab'})">⇥</button>
+</div>
+<script>
+const qs = new URLSearchParams(location.search), sid = location.pathname.split("/").pop(), tok = qs.get("t");
+const img = document.getElementById("screen"), stage = document.getElementById("stage"), st = document.getElementById("status");
+let ws, lastUrl = null, prevBlob = null, closed = false;
+
+function connect() {
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/" + sid + "?t=" + encodeURIComponent(tok));
+  ws.binaryType = "blob";
+  ws.onmessage = ev => {
+    if (typeof ev.data !== "string") {
+      const u = URL.createObjectURL(ev.data);
+      img.onload = () => { if (prevBlob) URL.revokeObjectURL(prevBlob); prevBlob = u; };
+      img.src = u; st.style.display = "none"; return;
+    }
+    const m = JSON.parse(ev.data);
+    document.getElementById("name").textContent = m.name || "";
+    if (m.status !== "running") { st.style.display = "block"; st.textContent = m.status === "error" ? "Error: " + (m.error || "") : m.status + "…"; }
+    const tabs = m.tabs || [];
+    document.getElementById("tabs").innerHTML = tabs.map(t => `<span class="tab ${t.active ? "on" : ""}" onclick="send({t:'tab',i:${t.i}})">${(t.title || t.url || "new tab").replace(/[<>&]/g, "")}</span>`).join("")
+      + `<span class="tab" onclick="send({t:'newtab'})">+</span>` + (tabs.length > 1 ? `<span class="tab" onclick="send({t:'closetab'})">×</span>` : "");
+    const active = tabs.find(t => t.active);
+    const urlBox = document.getElementById("url");
+    if (active && active.url !== lastUrl && document.activeElement !== urlBox) { urlBox.value = active.url; lastUrl = active.url; }
+  };
+  ws.onclose = () => { if (!closed) { st.style.display = "block"; st.textContent = "Disconnected. Reconnecting…"; setTimeout(connect, 1500); } };
+}
+function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function pt(e) { const r = img.getBoundingClientRect(); const sx = img.naturalWidth / r.width, sy = img.naturalHeight / r.height;
+  return { x: Math.round((e.clientX - r.left) * sx), y: Math.round((e.clientY - r.top) * sy) }; }
+
+img.addEventListener("click", e => { stage.focus(); send({ t: "click", ...pt(e) }); });
+img.addEventListener("dblclick", e => send({ t: "click", n: 2, ...pt(e) }));
+img.addEventListener("contextmenu", e => { e.preventDefault(); send({ t: "click", button: "right", ...pt(e) }); });
+let lastMove = 0;
+img.addEventListener("mousemove", e => { const n = Date.now(); if (n - lastMove > 100) { lastMove = n; send({ t: "move", ...pt(e) }); } });
+stage.addEventListener("wheel", e => { e.preventDefault(); send({ t: "scroll", dx: e.deltaX, dy: e.deltaY, ...pt(e) }); }, { passive: false });
+let touchY = null;
+stage.addEventListener("touchstart", e => { touchY = e.touches[0].clientY; }, { passive: true });
+stage.addEventListener("touchmove", e => { if (touchY === null) return; const y = e.touches[0].clientY; const d = touchY - y;
+  if (Math.abs(d) > 12) { send({ t: "scroll", dy: d * 2, ...pt(e.touches[0]) }); touchY = y; } e.preventDefault(); }, { passive: false });
+
+const SPECIAL = new Set(["Enter","Backspace","Tab","Escape","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Delete","Home","End","PageUp","PageDown"]);
+stage.addEventListener("keydown", e => {
+  const mod = e.ctrlKey || e.metaKey || e.altKey;
+  if (mod && e.key.length === 1) { e.preventDefault(); send({ t: "key", key: (e.ctrlKey ? "Control+" : "") + (e.metaKey ? "Meta+" : "") + (e.altKey ? "Alt+" : "") + e.key }); return; }
+  if (SPECIAL.has(e.key)) { e.preventDefault(); send({ t: "key", key: e.key }); return; }
+  if (e.key.length === 1) { e.preventDefault(); send({ t: "type", text: e.key }); }
+});
+stage.addEventListener("paste", e => { const t = e.clipboardData.getData("text"); if (t) send({ t: "type", text: t }); });
+document.getElementById("url").addEventListener("keydown", e => { if (e.key === "Enter") { send({ t: "goto", url: e.target.value }); stage.focus(); } });
+function sendText() { const i = document.getElementById("txt"); if (i.value) { send({ t: "type", text: i.value }); i.value = ""; } }
+document.getElementById("txt").addEventListener("keydown", e => { if (e.key === "Enter") { sendText(); send({ t: "key", key: "Enter" }); } });
+async function stopSession() {
+  if (!confirm("Close the browser and sync this profile?")) return;
+  closed = true; st.style.display = "block"; st.textContent = "Syncing…";
+  const r = await fetch(`/sessions/${sid}?t=${encodeURIComponent(tok)}`, { method: "DELETE" });
+  const j = await r.json().catch(() => ({}));
+  st.textContent = j.status === "stopped" ? "Closed and synced. You can close this tab." : "Stopped: " + (j.error || j.status || r.status);
+}
+connect();
+</script>
+</body>
+</html>

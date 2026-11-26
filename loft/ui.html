@@ -5,17 +5,18 @@
 <title>Loft</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --mute:#6b7280; --line:#e5e7eb; --acc:#2f6fed; --ok:#16a34a; --warn:#b45309; --bad:#dc2626; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#171a21; --ink:#e7e9ee; --mute:#9aa1ad; --line:#272b35; --acc:#5b8cff; } }
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --mute:#6b7280; --line:#e5e7eb; --acc:#2f6fed; --ok:#16a34a; --warn:#b45309; --bad:#dc2626; --soft:#eef3ff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#171a21; --ink:#e7e9ee; --mute:#9aa1ad; --line:#272b35; --acc:#5b8cff; --soft:#1b2233; } }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
-  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; }
-  header b { font-size:16px; letter-spacing:.2px; }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:2; }
+  header b { font-size:16px; }
   nav button { background:none; border:0; padding:6px 10px; border-radius:6px; color:var(--mute); cursor:pointer; font:inherit; }
   nav button.on { background:var(--bg); color:var(--ink); font-weight:600; }
   .sp { flex:1; }
-  main { padding:20px; max-width:1200px; margin:0 auto; }
+  main { padding:20px; max-width:1240px; margin:0 auto; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .pad { padding:16px; }
   table { width:100%; border-collapse:collapse; }
   th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:middle; }
   th { font-size:12px; color:var(--mute); font-weight:500; text-transform:uppercase; letter-spacing:.4px; }
@@ -27,17 +28,27 @@
   button.d { color:var(--bad); }
   button:disabled { opacity:.5; cursor:default; }
   input, select, textarea { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); width:100%; }
+  textarea { font:12px ui-monospace, Menlo, monospace; min-height:90px; }
   label { display:block; margin:10px 0 4px; font-size:12px; color:var(--mute); }
   .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); }
   .run { color:var(--ok); border-color:var(--ok); } .busy { color:var(--warn); border-color:var(--warn); }
   .row { display:flex; gap:8px; align-items:center; }
-  .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
-  dialog { border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); width:440px; padding:20px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  dialog { border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); width:480px; max-width:95vw; padding:20px; }
   dialog::backdrop { background:rgba(0,0,0,.35); }
-  .login { max-width:380px; margin:80px auto; padding:24px; }
+  .login { max-width:400px; margin:70px auto; padding:24px; }
   .err { color:var(--bad); min-height:18px; margin-top:8px; }
-  .log { font:12px ui-monospace, Menlo, monospace; color:var(--mute); white-space:pre-wrap; }
-  code { font:12px ui-monospace, Menlo, monospace; background:var(--bg); padding:2px 6px; border-radius:4px; }
+  .log { font:12px ui-monospace, Menlo, monospace; color:var(--mute); white-space:pre-wrap; max-width:520px; }
+  code { font:12px ui-monospace, Menlo, monospace; background:var(--bg); padding:2px 6px; border-radius:4px; word-break:break-all; }
+  .banner { background:var(--soft); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; gap:12px; align-items:center; }
+  .menu { position:relative; display:inline-block; }
+  .menu > div { display:none; position:absolute; right:0; top:110%; background:var(--card); border:1px solid var(--line); border-radius:8px; min-width:170px; z-index:3; box-shadow:0 6px 24px rgba(0,0,0,.12); }
+  .menu.open > div { display:block; }
+  .menu > div button { display:block; width:100%; text-align:left; background:none; border:0; padding:8px 12px; font:inherit; color:var(--ink); cursor:pointer; }
+  .menu > div button:hover { background:var(--bg); }
+  h3 { margin:0 0 6px; }
+  .section { margin-top:22px; }
 </style>
 </head>
 <body>
@@ -48,15 +59,17 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let S = null, tab = "profiles", filter = "";
 
-async function api(method, path, body) {
+async function api(method, path, body, raw) {
   const r = await fetch("/api" + path, { method, headers: { "X-Loft": "1", "Content-Type": "application/json" },
                                          body: body ? JSON.stringify(body) : undefined });
+  if (raw && r.ok) return r;
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.detail || r.statusText);
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || r.statusText));
   return j;
 }
 async function load() { S = await api("GET", "/state"); render(); }
-function canAdmin() { return S.role === "owner" || S.role === "admin"; }
+const canAdmin = () => S.role === "owner" || S.role === "admin";
+const job = k => S.jobs && S.jobs[k];
 
 function render() {
   if (!S.signed_in) return renderLogin();
@@ -66,12 +79,21 @@ function render() {
     <b>Loft</b>
     <nav>${["profiles","team","activity"].map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</nav>
     <span class="sp"></span>
-    ${teams.length ? `<select style="width:auto" onchange="useTeam(this.value)">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
+    ${teams.length ? `<select style="width:auto" onchange="act(()=>api('POST','/team/'+this.value))">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
     <span class="mute small">${esc(S.me.email)} · ${esc(S.device)}</span>
-    <button class="b" onclick="logout()">Sign out</button>
+    <button class="b" onclick="act(()=>api('POST','/logout'))">Sign out</button>
   </header>
   <main id="main"></main>`;
+  let top = "";
+  const f = job("fetch");
+  if (!S.browser) top += `<div class="banner"><div><b>Browser not installed.</b> <span class="mute">Camoufox is a one-time ~1.3 GB download.</span>
+    ${f ? `<div class="log">${esc(f.log.join("\n"))}</div>` : ""}</div><span class="sp"></span>
+    <button class="b p" ${f && f.alive ? "disabled" : ""} onclick="act(()=>api('POST','/browser/install'))">${f && f.alive ? "Downloading…" : "Install browser"}</button></div>`;
+  if (teams.length && !S.has_key) top += `<div class="banner"><div><b>This device doesn't have the team's encryption key.</b>
+    <span class="mute">Profiles are end-to-end encrypted. Join with the full invite code (it ends with <code>.key</code>), or sign in again with your password.</span></div></div>`;
+  $("#main").innerHTML = top + `<div id="body"></div>`;
   if (!teams.length) return renderNoTeam();
+  if (!S.has_key) return;
   ({profiles: renderProfiles, team: renderTeam, activity: renderActivity})[tab]();
 }
 
@@ -84,99 +106,151 @@ function renderLogin() {
     <details style="margin-top:10px"><summary class="mute small">New account</summary>
       <label>Name</label><input id="nm"><label>Invite code (needed except for the first user)</label><input id="inv">
     </details>
+    <details style="margin-top:6px"><summary class="mute small">Self-signed server certificate</summary>
+      <label>Paste the server's cert.pem</label><textarea id="ca" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+    </details>
     <div class="row" style="margin-top:16px"><button class="b p" onclick="login(false)">Sign in</button><button class="b" onclick="login(true)">Create account</button></div>
     <div class="err" id="err"></div></div>`;
 }
-async function login(register) {
+async function login(signup) {
   try {
+    $("#err").textContent = "Deriving keys…";
     await api("POST", "/login", { server: $("#srv").value.trim(), email: $("#em").value.trim(), password: $("#pw").value,
-      register, name: $("#nm").value, invite: $("#inv").value.trim() || null });
+      signup, name: $("#nm").value, invite: $("#inv").value.trim() || null, ca: $("#ca").value || null });
     await load();
   } catch (e) { $("#err").textContent = e.message; }
 }
-async function logout() { await api("POST", "/logout"); await load(); }
-async function useTeam(id) { await api("POST", "/team/" + id); await load(); }
 
 function renderNoTeam() {
-  $("#main").innerHTML = `<div class="card" style="padding:20px;max-width:480px">
-    <h3 style="margin-top:0">You're not in a team yet</h3>
+  $("#body").innerHTML = `<div class="card pad" style="max-width:480px">
+    <h3>You're not in a team yet</h3>
     <label>Create a team</label><div class="row"><input id="tn" placeholder="Team name"><button class="b p" onclick="act(()=>api('POST','/teams',{name:$('#tn').value}))">Create</button></div>
     <label>Or join with an invite code</label><div class="row"><input id="jc"><button class="b" onclick="act(()=>api('POST','/join',{code:$('#jc').value}))">Join</button></div>
     <div class="err" id="err"></div></div>`;
 }
 
-async function act(fn) {
-  try { await fn(); await load(); }
-  catch (e) { const el = $("#err") || $("#derr"); if (el) el.textContent = e.message; else alert(e.message); }
+async function act(fn, btn) {
+  if (btn) { btn.disabled = true; }
+  try { const r = await fn(); await load(); return r; }
+  catch (e) { const el = ($("#dlg").open && $("#derr")) || $("#err"); if (el) el.textContent = e.message; else alert(e.message); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 function status(p) {
-  const local = S.running[p.id];
-  if (local && local.alive) return `<span class="pill run">running here</span>`;
+  if (p.running_here) return `<span class="pill run">running here</span>`;
   if (p.running) return `<span class="pill busy">in use: ${esc(p.running.by)} @ ${esc(p.running.device)}</span>`;
   return `<span class="mute small">${p.version ? "v" + p.version : "never run"}</span>`;
 }
 
 function renderProfiles() {
   const ps = S.profiles.filter(p => !filter || (p.name + " " + p.tags.join(" ") + " " + p.notes).toLowerCase().includes(filter));
-  $("#main").innerHTML = `
+  $("#body").innerHTML = `
   <div class="toolbar">
-    <input style="max-width:280px" placeholder="Search name, tag, notes" value="${esc(filter)}" id="q" oninput="filter=this.value.toLowerCase();renderProfiles();const q=$('#q');q.focus();q.setSelectionRange(q.value.length,q.value.length)">
-    <span class="sp"></span><button class="b p" onclick="newDlg()">New profile</button>
+    <input id="q" style="max-width:280px" placeholder="Search name, tag, notes" value="${esc(filter)}"
+      oninput="filter=this.value.toLowerCase();renderProfiles();const q=$('#q');q.focus();q.setSelectionRange(q.value.length,q.value.length)">
+    <span class="sp"></span>
+    <button class="b" onclick="importDlg()">Import</button>
+    <button class="b" onclick="bulkDlg()">Bulk create</button>
+    <button class="b p" onclick="newDlg()">New profile</button>
   </div>
   <div class="card"><table>
     <tr><th>Name</th><th>OS</th><th>Proxy</th><th>Tags</th><th>Status</th><th></th></tr>
-    ${ps.map(p => {
-      const busy = p.running || (S.running[p.id] && S.running[p.id].alive);
-      const log = S.running[p.id] ? S.running[p.id].log.join("\n") : "";
-      return `<tr>
-        <td><b>${esc(p.name)}</b>${p.notes ? `<div class="mute small">${esc(p.notes)}</div>` : ""}${log ? `<div class="log">${esc(log)}</div>` : ""}</td>
-        <td>${esc(p.os)}</td>
-        <td class="small">${p.proxy ? esc(p.proxy.server) : '<span class="mute">direct</span>'}</td>
-        <td class="small">${p.tags.map(t => `<span class="pill">${esc(t)}</span>`).join(" ")}</td>
-        <td>${status(p)}</td>
-        <td style="text-align:right;white-space:nowrap">
-          <button class="b p" ${busy ? "disabled" : ""} onclick="act(()=>api('POST','/profiles/${p.id}/run'))">Run</button>
-          ${p.access === "edit" ? `<button class="b" onclick="editDlg(${p.id})">Edit</button><button class="b" onclick="shareDlg(${p.id})">Share</button>` : `<span class="mute small">run only</span>`}
-          ${p.running && canAdmin() && !(S.running[p.id] && S.running[p.id].alive) ? `<button class="b d" onclick="if(confirm('Force-release the lock? Unsynced changes on the other device will be rejected.'))act(()=>api('POST','/profiles/${p.id}/unlock'))">Unlock</button>` : ""}
-        </td></tr>`; }).join("") || `<tr><td colspan="6" class="mute">No profiles yet.</td></tr>`}
+    ${ps.map(row).join("") || `<tr><td colspan="6" class="mute">No profiles yet.</td></tr>`}
   </table></div>
-  <p class="mute small">Each profile keeps one fingerprint for life and its cookies and storage sync to the server when you close the browser. Only one person can run a profile at a time.</p>`;
+  <p class="mute small">Each profile keeps one fingerprint for life. Its cookies and storage are end-to-end encrypted and sync when the browser closes. Only one person can run a profile at a time.</p>`;
+}
+function row(p) {
+  const j = job("run-" + p.id), busy = p.running || p.running_here, edit = p.access === "edit";
+  return `<tr>
+    <td><b>${esc(p.name)}</b> <span class="mute small">#${p.id}</span>${p.notes ? `<div class="mute small">${esc(p.notes)}</div>` : ""}${j ? `<div class="log">${esc(j.log.join("\n"))}</div>` : ""}</td>
+    <td>${esc(p.os)}<div class="mute small">canvas ${esc(p.canvas)}</div></td>
+    <td class="small">${p.proxy ? esc(p.proxy.server) : '<span class="mute">direct</span>'}</td>
+    <td class="small">${p.tags.map(t => `<span class="pill">${esc(t)}</span>`).join(" ")}</td>
+    <td>${status(p)}</td>
+    <td style="text-align:right;white-space:nowrap">
+      ${p.running_here ? `<button class="b" onclick="act(()=>api('POST','/profiles/${p.id}/stop'),this)">Stop &amp; sync</button>`
+        : `<button class="b p" ${busy ? "disabled" : ""} onclick="act(()=>api('POST','/profiles/${p.id}/run'),this)">Run</button>`}
+      ${S.runners.length ? `<button class="b" ${busy ? "disabled" : ""} onclick="cloud(${p.id},this)" title="Run on a cloud runner, view from any device">Cloud</button>` : ""}
+      <span class="menu" id="m${p.id}"><button class="b" onclick="toggleMenu(${p.id},event)">⋯</button><div>
+        ${edit ? `<button onclick="editDlg(${p.id})">Edit</button><button onclick="shareDlg(${p.id})">Share</button>` : ""}
+        <button ${busy ? "disabled" : ""} onclick="cookieDlg(${p.id})">Import cookies</button>
+        <button ${busy ? "disabled" : ""} onclick="exportCookies(${p.id})">Export cookies</button>
+        <button onclick="exportDlg(${p.id})">Export profile</button>
+        ${p.running && canAdmin() && !p.running_here ? `<button style="color:var(--bad)" onclick="if(confirm('Force-release the lock? Unsynced changes on the other device will be rejected.'))act(()=>api('POST','/profiles/${p.id}/unlock'))">Force unlock</button>` : ""}
+      </div></span>
+    </td></tr>`;
+}
+function toggleMenu(id, e) { e.stopPropagation(); document.querySelectorAll(".menu.open").forEach(m => m.id !== "m" + id && m.classList.remove("open")); $("#m" + id).classList.toggle("open"); }
+document.addEventListener("click", () => document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open")));
+
+async function cloud(id, btn) {
+  const w = window.open("about:blank");
+  const r = await act(() => api("POST", `/profiles/${id}/cloud`, {}), btn);
+  if (r && r.view) { if (w) w.location = r.view; else prompt("Open this link on any device:", r.view); } else if (w) w.close();
 }
 
 function dlg(html) { const d = $("#dlg"); d.innerHTML = html + `<div class="err" id="derr"></div>`; d.showModal(); }
-function close_() { $("#dlg").close(); }
+const close_ = () => $("#dlg").close();
+const osSel = (id, v) => `<select id="${id}">${["windows","macos","linux"].map(o => `<option ${o===v?"selected":""}>${o}</option>`).join("")}</select>`;
+const canvasSel = (id, v) => `<select id="${id}"><option value="noise" ${v!=="real"?"selected":""}>noise: random per read, works on any OS</option><option value="real" ${v==="real"?"selected":""}>real: this machine's rendering (same OS only)</option></select>`;
 
 function newDlg() {
-  dlg(`<h3 style="margin-top:0">New profile</h3>
+  dlg(`<h3>New profile</h3>
+    ${S.templates.length ? `<label>Template</label><select id="n_tpl" onchange="applyTpl(this.value)"><option value="">none</option>${S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>` : ""}
     <label>Name</label><input id="n_name">
-    <label>OS fingerprint</label><select id="n_os"><option>windows</option><option>macos</option><option>linux</option></select>
-    <label>Proxy (optional) — scheme://user:pass@host:port</label><input id="n_proxy" placeholder="http://user:pass@1.2.3.4:8080">
+    <div class="grid2"><div><label>OS fingerprint</label>${osSel("n_os","windows")}</div><div><label>Canvas</label>${canvasSel("n_canvas","noise")}</div></div>
+    <label>Proxy (optional): scheme://user:pass@host:port</label><input id="n_proxy" placeholder="http://user:pass@1.2.3.4:8080">
     <label>Start URL</label><input id="n_url" placeholder="https://">
     <label>Tags (comma separated)</label><input id="n_tags">
     <label>Notes</label><input id="n_notes">
     <div class="row" style="margin-top:16px"><button class="b p" id="n_go" onclick="createProfile()">Create</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }
+function applyTpl(id) {
+  const t = S.templates.find(x => x.id == id); if (!t) return; const s = t.settings;
+  $("#n_os").value = s.os || "windows"; $("#n_canvas").value = s.canvas || "noise"; $("#n_proxy").value = s.proxy || "";
+  $("#n_url").value = s.start_url || ""; $("#n_tags").value = (s.tags || []).join(", ");
+}
+const tags = v => v.split(",").map(s => s.trim()).filter(Boolean);
 async function createProfile() {
-  $("#n_go").disabled = true; $("#n_go").textContent = "Generating fingerprint…";
+  const b = $("#n_go"); b.disabled = true; b.textContent = "Generating fingerprint…";
   try {
-    await api("POST", "/profiles", { name: $("#n_name").value.trim(), os: $("#n_os").value, proxy: $("#n_proxy").value.trim(),
-      start_url: $("#n_url").value.trim(), notes: $("#n_notes").value, tags: $("#n_tags").value.split(",").map(s => s.trim()).filter(Boolean) });
+    await api("POST", "/profiles", { name: $("#n_name").value.trim(), os: $("#n_os").value, canvas: $("#n_canvas").value,
+      proxy: $("#n_proxy").value.trim(), start_url: $("#n_url").value.trim(), notes: $("#n_notes").value, tags: tags($("#n_tags").value) });
     close_(); await load();
-  } catch (e) { $("#derr").textContent = e.message; $("#n_go").disabled = false; $("#n_go").textContent = "Create"; }
+  } catch (e) { $("#derr").textContent = e.message; b.disabled = false; b.textContent = "Create"; }
 }
 
-function editDlg(id) {
+function bulkDlg() {
+  dlg(`<h3>Bulk create</h3>
+    <div class="grid2"><div><label>How many</label><input id="b_n" type="number" value="10" min="1" max="500"></div><div><label>Name pattern ({n} = number)</label><input id="b_name" value="Profile {n}"></div></div>
+    <div class="grid2"><div><label>OS fingerprint</label>${osSel("b_os","windows")}</div><div><label>Canvas</label>${canvasSel("b_canvas","noise")}</div></div>
+    <label>Proxies, one per line, assigned round-robin (optional)</label><textarea id="b_px" placeholder="http://user:pass@1.2.3.4:8080"></textarea>
+    <label>Tags</label><input id="b_tags">
+    <label>Start URL</label><input id="b_url">
+    <p class="mute small">Every profile gets its own fingerprint. Generating takes about a second each.</p>
+    <div class="row"><button class="b p" id="b_go" onclick="bulkGo()">Create</button><button class="b" onclick="close_()">Cancel</button></div>`);
+}
+async function bulkGo() {
+  const b = $("#b_go"); b.disabled = true; b.textContent = "Creating…";
+  try {
+    const r = await api("POST", "/profiles/bulk", { count: +$("#b_n").value, name: $("#b_name").value, os: $("#b_os").value,
+      canvas: $("#b_canvas").value, proxies: $("#b_px").value.split("\n"), tags: tags($("#b_tags").value), start_url: $("#b_url").value.trim() });
+    close_(); await load(); alert(`Created ${r.created} profiles.`);
+  } catch (e) { $("#derr").textContent = e.message; b.disabled = false; b.textContent = "Create"; }
+}
+
+async function editDlg(id) {
   const p = S.profiles.find(x => x.id === id);
-  const px = p.proxy ? (p.proxy.username ? p.proxy.server.replace("://", `://${p.proxy.username}:${p.proxy.password || ""}@`) : p.proxy.server) : "";
-  dlg(`<h3 style="margin-top:0">Edit ${esc(p.name)}</h3>
+  const px = (await api("GET", `/profiles/${id}/proxy`)).proxy;
+  dlg(`<h3>Edit ${esc(p.name)}</h3>
     <label>Name</label><input id="e_name" value="${esc(p.name)}">
     <label>Proxy (empty = direct)</label><input id="e_proxy" value="${esc(px)}">
+    <label>Canvas</label>${canvasSel("e_canvas", p.canvas)}
     <label>Start URL</label><input id="e_url" value="${esc(p.start_url)}">
     <label>Notes</label><input id="e_notes" value="${esc(p.notes)}">
     <p class="mute small">The fingerprint (${esc(p.os)}) is fixed for this profile's life.</p>
     <div class="row" style="margin-top:16px">
-      <button class="b p" onclick="act(async()=>{await api('PATCH','/profiles/${id}',{name:$('#e_name').value,proxy:$('#e_proxy').value,start_url:$('#e_url').value,notes:$('#e_notes').value});close_()})">Save</button>
+      <button class="b p" onclick="act(async()=>{await api('PATCH','/profiles/${id}',{name:$('#e_name').value,proxy:$('#e_proxy').value,canvas:$('#e_canvas').value,start_url:$('#e_url').value,notes:$('#e_notes').value});close_()})">Save</button>
       <button class="b" onclick="close_()">Cancel</button><span class="sp"></span>
       <button class="b d" onclick="if(confirm('Delete this profile for the whole team?'))act(async()=>{await api('DELETE','/profiles/${id}');close_()})">Delete</button>
     </div>`);
@@ -186,8 +260,8 @@ async function shareDlg(id) {
   const p = S.profiles.find(x => x.id === id);
   const shares = await api("GET", `/profiles/${id}/shares`);
   const others = S.members.filter(m => m.role === "member" && m.id !== p.created_by);
-  dlg(`<h3 style="margin-top:0">Share ${esc(p.name)}</h3>
-    <p class="mute small">Owners and admins see every profile. Members only see profiles they made or that are shared with them. <b>Run</b> can open it, and <b>Edit</b> can also change settings and sharing.</p>
+  dlg(`<h3>Share ${esc(p.name)}</h3>
+    <p class="mute small">Owners and admins see every profile. Members see only profiles they made or that are shared with them. <b>Run</b> can open it, and <b>Edit</b> can also change settings and sharing.</p>
     <table>${others.map(m => { const s = shares.find(x => x.user_id === m.id);
       return `<tr><td>${esc(m.email)}</td><td><select onchange="setShare(${id},${m.id},this.value)">
         <option value="" ${!s?"selected":""}>no access</option><option value="run" ${s&&s.level==="run"?"selected":""}>run</option><option value="edit" ${s&&s.level==="edit"?"selected":""}>edit</option></select></td></tr>`; }).join("")
@@ -199,39 +273,112 @@ async function setShare(pid, uid, level) {
   catch (e) { $("#derr").textContent = e.message; }
 }
 
-function renderTeam() {
+function cookieDlg(id) {
+  dlg(`<h3>Import cookies</h3>
+    <p class="mute small">Paste JSON (Cookie-Editor, EditThisCookie, Playwright) or a Netscape cookies.txt, or choose a file. Expiry dates more than 399 days out are shortened, as browsers do.</p>
+    <input type="file" id="c_file" accept=".json,.txt" onchange="this.files[0].text().then(t=>$('#c_txt').value=t)">
+    <label>Cookies</label><textarea id="c_txt" style="min-height:160px"></textarea>
+    <div class="row" style="margin-top:12px"><button class="b p" id="c_go" onclick="cookieGo(${id})">Import</button><button class="b" onclick="close_()">Cancel</button></div>`);
+}
+async function cookieGo(id) {
+  const b = $("#c_go"); b.disabled = true; b.textContent = "Opening profile…";
+  try { const r = await api("POST", `/profiles/${id}/cookies`, { text: $("#c_txt").value }); close_(); await load(); alert(`Imported ${r.cookies} cookies.`); }
+  catch (e) { $("#derr").textContent = e.message; b.disabled = false; b.textContent = "Import"; }
+}
+async function exportCookies(id) {
+  try { const c = await api("GET", `/profiles/${id}/cookies`);
+    save(new Blob([JSON.stringify(c, null, 2)], { type: "application/json" }), `cookies-${id}.json`); await load(); }
+  catch (e) { alert(e.message); }
+}
+function save(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+
+function exportDlg(id) {
+  dlg(`<h3>Export profile</h3>
+    <p class="mute small">A .loftprofile file holds the fingerprint, proxy, cookies and storage. Protect it with a passphrase.</p>
+    <label>Passphrase</label><input id="x_pw" type="password">
+    <div class="row" style="margin-top:12px"><button class="b p" id="x_go" onclick="exportGo(${id})">Export</button><button class="b" onclick="close_()">Cancel</button></div>`);
+}
+async function exportGo(id) {
+  const pw = $("#x_pw").value;
+  if (!pw && !confirm("Export without a passphrase? Anyone with the file gets the logged-in sessions.")) return;
+  try { const r = await api("POST", `/profiles/${id}/export`, { passphrase: pw }, true);
+    const name = (r.headers.get("Content-Disposition") || "").match(/filename="(.+)"/);
+    save(await r.blob(), name ? name[1] : `profile-${id}.loftprofile`); close_(); }
+  catch (e) { $("#derr").textContent = e.message; }
+}
+function importDlg() {
+  dlg(`<h3>Import profile</h3>
+    <input type="file" id="i_file" accept=".loftprofile">
+    <label>Passphrase (if it has one)</label><input id="i_pw" type="password">
+    <label>Name (optional)</label><input id="i_name">
+    <div class="row" style="margin-top:12px"><button class="b p" id="i_go" onclick="importGo()">Import</button><button class="b" onclick="close_()">Cancel</button></div>`);
+}
+async function importGo() {
+  const f = $("#i_file").files[0]; if (!f) return;
+  const buf = new Uint8Array(await f.arrayBuffer()); let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  try { await api("POST", "/import", { data: btoa(bin), passphrase: $("#i_pw").value, name: $("#i_name").value }); close_(); await load(); }
+  catch (e) { $("#derr").textContent = e.message; }
+}
+
+async function renderTeam() {
   const admin = canAdmin(), owner = S.role === "owner";
-  $("#main").innerHTML = `
+  const key = await api("GET", "/apikey");
+  $("#body").innerHTML = `
+  <h3>Members</h3>
   ${admin ? `<div class="toolbar"><select id="irole" style="width:auto"><option>member</option><option>admin</option></select>
-    <button class="b p" onclick="invite()">Create invite code</button><span id="icode"></span></div>` : ""}
+    <button class="b p" onclick="invite()">Create invite code</button></div><div id="icode" style="margin-bottom:12px"></div>` : ""}
   <div class="card"><table><tr><th>Member</th><th>Role</th><th></th></tr>
-  ${S.members.map(m => `<tr><td>${esc(m.name)} <span class="mute small">${esc(m.email)}</span></td>
-    <td>${admin && m.id !== S.me.id && (owner || m.role !== "owner") ? `<select style="width:auto" onchange="act(()=>api('POST','/members/${m.id}/role',{role:this.value}))">
+  ${S.members.map(m => { const can = admin && m.id !== S.me.id && (owner || m.role !== "owner");
+    return `<tr><td>${esc(m.name)} <span class="mute small">${esc(m.email)}</span></td>
+    <td>${can ? `<select style="width:auto" onchange="act(()=>api('POST','/members/${m.id}/role',{role:this.value}))">
       ${["member","admin"].concat(owner ? ["owner"] : []).map(r => `<option ${r===m.role?"selected":""}>${r}</option>`).join("")}</select>` : esc(m.role)}</td>
-    <td style="text-align:right">${admin && m.id !== S.me.id && (owner || m.role !== "owner") ? `<button class="b d" onclick="if(confirm('Remove ${esc(m.email)}?'))act(()=>api('DELETE','/members/${m.id}'))">Remove</button>` : ""}</td></tr>`).join("")}
+    <td style="text-align:right">${can ? `<button class="b d" onclick="if(confirm('Remove ${esc(m.email)}?'))act(()=>api('DELETE','/members/${m.id}'))">Remove</button>` : ""}</td></tr>`; }).join("")}
   </table></div>
-  <div class="card" style="padding:16px;margin-top:16px;max-width:480px">
+
+  <div class="section"><h3>Templates</h3><p class="mute small">Starting settings for new profiles. Stored encrypted.</p>
+  <div class="card"><table><tr><th>Name</th><th>Settings</th><th></th></tr>
+    ${S.templates.map(t => `<tr><td>${esc(t.name)}</td><td class="small mute">${esc(t.settings.os)} · canvas ${esc(t.settings.canvas)}${t.settings.proxy ? " · proxy" : ""}${(t.settings.tags||[]).length ? " · " + esc(t.settings.tags.join(", ")) : ""}</td>
+      <td style="text-align:right">${admin ? `<button class="b d" onclick="act(()=>api('DELETE','/templates/${t.id}'))">Delete</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No templates.</td></tr>`}
+  </table></div>${admin ? `<div class="row" style="margin-top:8px"><button class="b" onclick="tplDlg()">New template</button></div>` : ""}</div>
+
+  <div class="section"><h3>Cloud runners</h3><p class="mute small">Servers that run profiles for you, viewable from any browser or phone. Start one with <code>loft runner serve</code>.</p>
+  <div class="card"><table><tr><th>Name</th><th>URL</th><th></th></tr>
+    ${S.runners.map(r => `<tr><td>${esc(r.name)}</td><td class="small">${esc(r.url)}</td><td style="text-align:right">${admin ? `<button class="b d" onclick="act(()=>api('DELETE','/runners/${r.id}'))">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No runners.</td></tr>`}
+  </table></div>${admin ? `<div class="row" style="margin-top:8px"><input id="r_name" placeholder="name" style="max-width:140px"><input id="r_url" placeholder="https://runner:4420"><input id="r_key" placeholder="runner key"><button class="b" onclick="act(()=>api('POST','/runners',{name:$('#r_name').value,url:$('#r_url').value,key:$('#r_key').value}))">Add</button></div>` : ""}</div>
+
+  <div class="section"><h3>Automation API</h3>
+  <div class="card pad small">Local API on this machine: <code>${esc(key.base)}</code><br>Key: <code>${esc(key.key)}</code>
+  <div class="mute" style="margin-top:6px">e.g. <code>curl -H "X-API-Key: ${esc(key.key)}" ${esc(key.base)}/profiles</code>. Full Playwright control is in the Python SDK: <code>loft exec ID script.py</code>.</div></div></div>
+
+  <div class="section card pad" style="max-width:480px">
     <label style="margin-top:0">Join another team</label><div class="row"><input id="jc" placeholder="invite code"><button class="b" onclick="act(()=>api('POST','/join',{code:$('#jc').value}))">Join</button></div>
     <label>Create another team</label><div class="row"><input id="tn"><button class="b" onclick="act(()=>api('POST','/teams',{name:$('#tn').value}))">Create</button></div>
     <div class="err" id="err"></div></div>`;
 }
+function tplDlg() {
+  dlg(`<h3>New template</h3><label>Name</label><input id="t_name">
+    <div class="grid2"><div><label>OS</label>${osSel("t_os","windows")}</div><div><label>Canvas</label>${canvasSel("t_canvas","noise")}</div></div>
+    <label>Proxy</label><input id="t_proxy" placeholder="http://user:pass@host:port"><label>Start URL</label><input id="t_url"><label>Tags</label><input id="t_tags">
+    <div class="row" style="margin-top:12px"><button class="b p" onclick="act(async()=>{await api('POST','/templates',{name:$('#t_name').value,os:$('#t_os').value,canvas:$('#t_canvas').value,proxy:$('#t_proxy').value.trim(),start_url:$('#t_url').value.trim(),tags:tags($('#t_tags').value)});close_()})">Save</button><button class="b" onclick="close_()">Cancel</button></div>`);
+}
 async function invite() {
   try { const r = await api("POST", "/invite", { role: $("#irole").value });
-    $("#icode").innerHTML = `Code: <code>${esc(r.code)}</code> <span class="mute small">(${esc(r.role)}, valid 7 days, single use)</span>`; }
+    $("#icode").innerHTML = `<div class="card pad small">Invite (${esc(r.role)}, 7 days, single use):<br><code>${esc(r.code)}</code><br><span class="mute">It contains the team's encryption key. Send it privately.</span></div>`; }
   catch (e) { alert(e.message); }
 }
 
 async function renderActivity() {
-  if (!canAdmin()) { $("#main").innerHTML = `<p class="mute">Only owners and admins can see team activity.</p>`; return; }
+  if (!canAdmin()) { $("#body").innerHTML = `<p class="mute">Only owners and admins can see team activity.</p>`; return; }
   const rows = await api("GET", "/audit");
   const name = id => (S.profiles.find(p => p.id === id) || {}).name || (id ? "#" + id : "");
-  $("#main").innerHTML = `<div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>Profile</th><th>Detail</th></tr>
+  $("#body").innerHTML = `<div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>Profile</th><th>Detail</th></tr>
     ${rows.map(a => `<tr><td class="small">${new Date(a.at*1000).toLocaleString()}</td><td class="small">${esc(a.email)}</td>
       <td>${esc(a.action)}</td><td>${esc(name(a.profile_id))}</td><td class="small mute">${esc(a.detail)}</td></tr>`).join("")}</table></div>`;
 }
 
 load().catch(e => { $("#app").innerHTML = `<p class="err" style="padding:20px">${esc(e.message)}</p>`; });
-setInterval(() => { if (S && S.signed_in && tab === "profiles" && !$("#dlg").open) load().catch(() => {}); }, 3000);
+setInterval(() => { if (S && S.signed_in && tab === "profiles" && !$("#dlg").open && !document.querySelector(".menu.open")) load().catch(() => {}); }, 3000);
 </script>
 </body>
 </html>

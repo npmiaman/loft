@@ -173,17 +173,55 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
 def run_profile(client: Client, pid: int, *, headless: bool = False,
                 session: Optional[Callable] = None, log: Callable[[str], None] = print,
                 home: Path = PROFILES) -> dict:
-    """Interactive run: open the start URL and wait for the window to close (or run `session(context)`)."""
+    """Interactive run: open the start URL and wait until the window closes, a stop is requested
+    (stop file or Ctrl+C / SIGTERM), or `session(context)` returns. All three paths sync."""
     result: dict = {}
-    with open_profile(client, pid, headless=headless, home=home, log=log, result=result) as context:
-        if session:
-            session(context)
-        else:
-            page = context.pages[0] if context.pages else context.new_page()
-            if context.loft_info.get("start_url"):
-                page.goto(context.loft_info["start_url"])
-            context.wait_for_event("close", timeout=0)
+    stop_file = LocalProfile(pid, home).root / "stop"
+    stop_file.unlink(missing_ok=True)
+    stop = threading.Event()
+    restore = _graceful_signals(stop)
+    try:
+        with open_profile(client, pid, headless=headless, home=home, log=log, result=result) as context:
+            if session:
+                session(context)
+            else:
+                closed = threading.Event()
+                context.on("close", lambda *_: closed.set())
+                page = context.pages[0] if context.pages else context.new_page()
+                if context.loft_info.get("start_url"):
+                    page.goto(context.loft_info["start_url"])
+                while not closed.is_set():
+                    if stop.is_set() or stop_file.exists():
+                        log("stop requested: closing and syncing")
+                        break
+                    try:  # short waits keep Playwright's loop turning so the close event arrives
+                        context.wait_for_event("close", timeout=500)
+                        break
+                    except Exception:
+                        pass
+    finally:
+        restore()
+        stop_file.unlink(missing_ok=True)
     return result
+
+
+def request_stop(pid: int, home: Path = PROFILES) -> None:
+    """Ask a running `loft run` (any process on this machine) to close and sync."""
+    root = LocalProfile(pid, home).root
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "stop").touch()
+
+
+def _graceful_signals(stop: threading.Event) -> Callable[[], None]:
+    """Turn Ctrl+C / SIGTERM into a stop request instead of an exception inside Playwright."""
+    import signal
+    if threading.current_thread() is not threading.main_thread():
+        return lambda: None
+    old = {}
+    for sig in (signal.SIGINT, getattr(signal, "SIGTERM", None)):
+        if sig is not None:
+            old[sig] = signal.signal(sig, lambda *_: stop.set())
+    return lambda: [signal.signal(s, h) for s, h in old.items()]
 
 
 # ---------------------------------------------------------------- cookies

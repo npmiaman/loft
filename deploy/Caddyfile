@@ -1,0 +1,13 @@
+# Real TLS (Let's Encrypt) in front of a server bound to 127.0.0.1.
+#   uv run loft server --host 127.0.0.1 --port 4400
+#   uv run loft runner --host 127.0.0.1 --port 4420 --key "$RUNNER_KEY"
+loft.example.com {
+	reverse_proxy 127.0.0.1:4400
+	request_body {
+		max_size 2GB
+	}
+}
+
+runner-1.example.com {
+	reverse_proxy 127.0.0.1:4420
+}

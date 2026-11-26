@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 
 import loft.client as lc
 import loft.engine as le
-from loft.cli import parse_proxy
-from loft.desktop import make_app
+from loft.cli import BadInput, parse_proxy, proxy_url
+from loft.desktop import api_key, make_app
 from tests.conftest import FP
 
 
@@ -18,6 +18,12 @@ def app(tmp_path, monkeypatch, server):
     return t, server
 
 
+def signed_in(t, server):
+    r = t.post("/api/login", json={"server": server, "email": "a@x.io", "password": "password1", "signup": True})
+    assert r.status_code == 200, r.text
+    t.post("/api/teams", json={"name": "T"})
+
+
 def test_foreign_host_and_missing_header_blocked(app):
     t, _ = app
     assert t.get("/api/state", headers={"host": "evil.com"}).status_code == 403
@@ -28,21 +34,53 @@ def test_foreign_host_and_missing_header_blocked(app):
 def test_flow_login_team_profile(app):
     t, server = app
     assert t.get("/api/state").json()["signed_in"] is False
-    r = t.post("/api/login", json={"server": server, "email": "a@x.io", "password": "password1", "register": True})
-    assert r.status_code == 200, r.text
-    assert t.get("/api/state").json()["me"]["teams"] == []
-    t.post("/api/teams", json={"name": "T"})
+    signed_in(t, server)
     r = t.post("/api/profiles", json={"name": "P1", "os": "macos", "proxy": "http://u:pw@9.9.9.9:3128", "tags": ["a"]})
     assert r.status_code == 200, r.text
     s = t.get("/api/state").json()
-    assert s["role"] == "owner"
+    assert s["role"] == "owner" and s["has_key"] is True
     p = s["profiles"][0]
     assert p["proxy"] == {"server": "http://9.9.9.9:3128", "username": "u", "password": "pw"} and p["os"] == "macos"
-    t.patch(f"/api/profiles/{p['id']}", json={"proxy": ""})
-    assert t.get("/api/state").json()["profiles"][0]["proxy"] is None
+    assert t.get(f"/api/profiles/{p['id']}/proxy").json()["proxy"] == "http://u:pw@9.9.9.9:3128"
+    t.patch(f"/api/profiles/{p['id']}", json={"proxy": "", "canvas": "real"})
+    p = t.get("/api/state").json()["profiles"][0]
+    assert p["proxy"] is None and p["canvas"] == "real"
     code = t.post("/api/invite", json={"role": "member"}).json()["code"]
-    assert len(code) > 10
+    assert "." in code  # server code + team key
     assert t.get("/api/audit").status_code == 200
+
+
+def test_bulk_and_templates(app):
+    t, server = app
+    signed_in(t, server)
+    r = t.post("/api/profiles/bulk", json={"count": 3, "name": "Acct {n}", "proxies": ["http://1.1.1.1:80", "socks5://2.2.2.2:1080", ""]})
+    assert r.json() == {"created": 3}
+    ps = t.get("/api/state").json()["profiles"]
+    assert [p["name"] for p in ps] == ["Acct 1", "Acct 2", "Acct 3"]
+    assert [p["proxy"]["server"] for p in ps] == ["http://1.1.1.1:80", "socks5://2.2.2.2:1080", "http://1.1.1.1:80"]
+    assert t.post("/api/profiles/bulk", json={"count": 0}).status_code == 400
+    assert t.post("/api/templates", json={"name": "US", "os": "linux", "proxy": "http://u:p@h:1"}).status_code == 200
+    tpl = t.get("/api/state").json()["templates"][0]
+    assert tpl["settings"]["proxy"] == "http://u:p@h:1" and tpl["settings"]["os"] == "linux"
+    assert t.post("/api/templates", json={"name": "bad", "proxy": "http://noport"}).status_code == 400
+
+
+def test_v1_api_requires_key(app):
+    t, server = app
+    signed_in(t, server)
+    plain = TestClient(t.app, base_url="http://127.0.0.1")
+    assert plain.get("/v1/profiles").status_code == 401
+    assert plain.get("/v1/profiles", headers={"X-API-Key": "wrong"}).status_code == 401
+    h = {"X-API-Key": api_key()}
+    r = plain.post("/v1/profiles", headers=h, json={"name": "via api", "os": "linux"})
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+    assert plain.get("/v1/profiles", headers={"Authorization": "Bearer " + api_key()}).json()[0]["name"] == "via api"
+    st = plain.get(f"/v1/profiles/{pid}/status", headers=h).json()
+    assert st["running_here"] is False and st["version"] == 0
+    assert plain.post(f"/v1/profiles/{pid}/stop", headers=h).status_code == 404
+    assert len(plain.post("/v1/profiles/bulk", headers=h, json={"count": 2}).json()) == 2
+    assert plain.get("/v1/profiles", headers={**h, "host": "evil.com"}).status_code == 403
 
 
 def test_bad_login_reports_error(app):
@@ -51,9 +89,21 @@ def test_bad_login_reports_error(app):
     assert r.status_code == 401
 
 
-def test_parse_proxy():
+def test_parse_proxy_roundtrip():
     assert parse_proxy("socks5://1.2.3.4:1080") == {"server": "socks5://1.2.3.4:1080"}
     assert parse_proxy("u:p@h.com:80") == {"server": "http://h.com:80", "username": "u", "password": "p"}
+    assert proxy_url(parse_proxy("http://u:p@h.com:80")) == "http://u:p@h.com:80"
     assert parse_proxy("") is None
-    with pytest.raises(SystemExit):
+    with pytest.raises(BadInput):
         parse_proxy("http://noport")
+
+
+def test_tls_self_signed_and_bind_rule(tmp_path):
+    from loft.tls import check_bind, fingerprint, self_signed
+    cert, key = self_signed(tmp_path, ["loft.local", "10.0.0.5"])
+    assert cert.exists() and oct(key.stat().st_mode)[-3:] == "600" and len(fingerprint(cert)) == 64
+    assert self_signed(tmp_path, ["loft.local"]) == (cert, key)  # reused when hosts are covered
+    with pytest.raises(SystemExit):
+        check_bind("0.0.0.0", tls=False, insecure=False)
+    check_bind("0.0.0.0", tls=True, insecure=False)
+    check_bind("127.0.0.1", tls=False, insecure=False)
