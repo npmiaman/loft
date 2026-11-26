@@ -1,0 +1,13 @@
+<!doctype html><html><head><title>mock submit</title><style>body{font:15px sans-serif;margin:20px} textarea,[contenteditable]{display:block;border:1px solid #888;width:480px;min-height:44px;padding:6px;margin:8px 0} button{padding:8px 14px}</style></head><body>
+<h2>Create post</h2>
+<textarea id="t" placeholder="Title" name="title"></textarea>
+<div id="b" contenteditable="true" aria-label="Body text (optional)"></div>
+<button id="post">Post</button>
+<script>
+document.getElementById('post').addEventListener('click', async () => {
+  const title = document.getElementById('t').value.trim(), body = document.getElementById('b').innerText.trim();
+  if (!title) { document.body.insertAdjacentHTML('beforeend', '<p>Please add a title</p>'); return; }
+  await fetch('/__submit', {method: 'POST', body: JSON.stringify({title, body})});
+  location.href = '/r/saas/comments/new1/' + encodeURIComponent(title.slice(0, 20)) + '/';
+});
+</script></body></html>

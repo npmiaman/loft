@@ -210,3 +210,40 @@ def test_native_profile_shows_host_fonts_camoufox_would_hide():
     assert installed_known <= fonts, sorted(installed_known - fonts)[:20]
     assert essential & known <= fonts
     assert default_canvas(host) == "real" and default_canvas("windows" if host != "windows" else "macos") == "noise"
+
+
+def test_real_canvas_is_actually_stable_across_launches(tmp_path):
+    """canvas "real" promises the machine's true, stable canvas. Firefox's baseline protection used to randomize it on web pages
+    (a different value every launch) unless it is switched off, so this launches one profile three times on a real http origin."""
+    import http.server
+    import threading
+    from loft.engine import camoufox_options, host_os, new_fingerprint
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<html><body>x</body></html>")
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    js = "() => { const c=document.createElement('canvas'); const x=c.getContext('2d'); x.font='16px Arial'; x.fillText('loft canvas 123', 2, 20); return c.toDataURL().slice(-48) }"
+    from camoufox.sync_api import Camoufox
+    fp = new_fingerprint(host_os())
+    seen = []
+    try:
+        for i in range(3):
+            info = dict(fingerprint=fp, proxy=None, os=host_os(), canvas="real")
+            with Camoufox(**camoufox_options(info, tmp_path / f"p{i}", True)) as ctx:
+                page = ctx.new_page()
+                page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                seen.append(page.evaluate(js))
+    finally:
+        srv.shutdown()
+    assert len(set(seen)) == 1, seen
+    noisy = camoufox_options(dict(fingerprint=fp, proxy=None, os=host_os(), canvas="noise"), tmp_path / "n", True)
+    assert "privacy.baselineFingerprintingProtection" not in noisy["firefox_user_prefs"]  # noise mode is untouched

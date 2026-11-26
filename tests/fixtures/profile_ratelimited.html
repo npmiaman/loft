@@ -1,0 +1,18 @@
+<!doctype html><html><head><title>mock</title><style>
+body{font:15px sans-serif;margin:0} shreddit-post,shreddit-comment{display:block;border-bottom:1px solid #ddd;padding:12px;min-height:200px}
+a{color:blue} .sp{height:600px} button{padding:8px 12px;margin:4px}
+[contenteditable]{border:1px solid #888;min-height:40px;padding:6px;margin:6px 0}
+</style></head><body><header><a href="/">Home</a><button>Messages</button></header><h1>u/ratelimited</h1><button id="chat">Chat</button>
+     <div id="chatbox" style="display:none"><div role="textbox" contenteditable="true" aria-label="Message" id="msg"></div><button aria-label="Send message" id="send">Send</button><div id="thread"></div><div id="err"></div></div>
+<script>
+window.__log={upvotes:0,comments:[],dms:[]};
+for (const el of document.querySelectorAll('shreddit-post,shreddit-comment')) {
+  const sr=el.attachShadow({mode:'open'});
+  sr.innerHTML='<button upvote aria-pressed="false">▲ Upvote</button><slot></slot>';
+  sr.querySelector('button').addEventListener('click',e=>{e.currentTarget.setAttribute('aria-pressed','true');window.__log.upvotes++;});
+}
+document.getElementById('chat').addEventListener('click',()=>{document.getElementById('chatbox').style.display='block'});
+     document.getElementById('send').addEventListener('click',()=>{const m=document.getElementById('msg');const t=m.innerText.trim();
+       if(true){document.getElementById('err').textContent="You're doing that too much. Try again in 9 minutes.";return;}
+       window.__log.dms.push(t);document.getElementById('thread').textContent=t;m.innerHTML='';});
+</script></body></html>

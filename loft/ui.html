@@ -142,6 +142,19 @@ function status(p) {
   return `<span class="mute small">${p.version ? "v" + p.version : "never run"}</span>`;
 }
 
+// Pigeon (Reddit agent) attached to an open session. Shown only while the profile is running on this machine.
+function pigeonRow(id, pg) {
+  const on = pg.state !== "idle";
+  const last = (pg.log || []).slice(-1)[0];
+  return `<div class="small" style="margin-top:6px"><span class="pill ${on ? "run" : ""}">🕊 Pigeon ${esc(pg.state)}${on && pg.mode ? " · " + esc(pg.mode) : ""}</span>
+    ${on ? `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'stop'}))">Stop</button>`
+         : `<select id="pm${id}" style="width:auto"><option value="find">find leads</option><option value="dm">send DMs</option><option value="full">find + DM</option></select>
+            <button class="b p" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'start',mode:$('#pm${id}').value}))">Attach Pigeon</button>`}
+    <button class="b" onclick="pgOpen(${id})">Open Pigeon</button>
+    <span class="mute"> ${pg.stats ? `scanned ${pg.stats.scanned} · leads ${pg.stats.leads} · DMs ${pg.stats.dms}` : ""}${pg.error ? " · " + esc(pg.error) : ""}</span>
+    ${last ? `<div class="log">${esc(last.msg)}</div>` : ""}</div>`;
+}
+
 function renderProfiles() {
   const ps = S.profiles.filter(p => !filter || (p.name + " " + p.tags.join(" ") + " " + p.notes).toLowerCase().includes(filter));
   $("#body").innerHTML = `
@@ -162,7 +175,7 @@ function renderProfiles() {
 function row(p) {
   const j = job("run-" + p.id), busy = p.running || p.running_here, edit = p.access === "edit";
   return `<tr>
-    <td><b>${esc(p.name)}</b> <span class="mute small">#${p.id}</span>${p.notes ? `<div class="mute small">${esc(p.notes)}</div>` : ""}${j ? `<div class="log">${esc(j.log.join("\n"))}</div>` : ""}</td>
+    <td><b>${esc(p.name)}</b> <span class="mute small">#${p.id}</span>${p.notes ? `<div class="mute small">${esc(p.notes)}</div>` : ""}${j ? `<div class="log">${esc(j.log.join("\n"))}</div>` : ""}${j && j.pigeon ? pigeonRow(p.id, j.pigeon) : ""}</td>
     <td>${esc(p.os)}<div class="mute small">canvas ${esc(p.canvas)}</div></td>
     <td class="small">${p.proxy ? esc(p.proxy.server) : '<span class="mute">direct</span>'}</td>
     <td class="small">${p.tags.map(t => `<span class="pill">${esc(t)}</span>`).join(" ")}</td>
@@ -448,6 +461,194 @@ async function renderOverview() {
 }
 
 load().catch(e => { $("#app").innerHTML = `<p class="err" style="padding:20px">${esc(e.message)}</p>`; });
+// ---------------------------------------------------------------- Pigeon panel: every feature, for one open session
+let PG = null;
+const pgApi = (path, body) => api("POST", `/profiles/${PG.id}/pigeon/${path}`, body);
+const pgOp = (op, args) => pgApi("op", { op, args: args || {} });
+const pgJob = (kind, args) => pgApi("job", { kind, args: args || {} });
+const pgTabs = ["leads", "run", "comments", "messages", "setup", "settings", "brain"];
+
+function pgOpen(id) {
+  PG = { id, tab: "leads", filter: "all", msg: "", edit: {} };
+  const d = $("#dlg"); d.style.width = "min(980px,94vw)";
+  d.innerHTML = `<div id="pg"></div>`; d.showModal();
+  $("#pg").addEventListener("input", () => { if (PG) PG.dirty = true; });  // typed-but-unsaved text must survive the periodic refresh
+  d.addEventListener("close", pgClosed, { once: true });
+  pgRefresh(true);
+  PG.timer = setInterval(() => pgRefresh(false), 2500);
+}
+function pgClosed() { if (PG) clearInterval(PG.timer); PG = null; $("#dlg").style.width = ""; }
+function pgTab(t) { PG.tab = t; PG.msg = ""; PG.dirty = false; pgRefresh(true); }
+async function pgGo(fn, okMsg) {
+  try { const r = await fn(); PG.msg = okMsg === undefined ? (r && r.out) || "" : okMsg; PG.err = ""; }
+  catch (e) { PG.err = e.message; }
+  PG.dirty = false;  // whatever was typed has now been acted on; show the server's state
+  await pgRefresh(true);
+}
+const editing = () => ["TEXTAREA", "INPUT", "SELECT"].includes((document.activeElement || {}).tagName);
+
+async function pgRefresh(force) {
+  if (!PG) return;
+  const me = PG, gen = (me.gen = (me.gen || 0) + 1);  // a newer refresh supersedes this one; a slow, older response must not overwrite fresher data
+  const stale = () => PG !== me || me.gen !== gen;
+  try {
+    const st = await api("GET", `/profiles/${me.id}/pigeon/status`);
+    if (stale()) return;
+    me.st = st;
+    if (!force && (editing() || me.dirty)) return pgBar();       // don't clobber what you're typing (or typed and haven't saved yet)
+    const t = me.tab, d = {};
+    if (t === "leads") d.leads = (await pgOp("leads_list")).leads;
+    if (t === "comments") { d.opps = (await pgOp("opps_list")).opportunities; d.ideas = (await pgOp("ideas_list")).ideas; d.posted = (await pgOp("posts_list")).posted; }
+    if (t === "messages") { d.tpl = await pgOp("template_show"); d.settings = (await pgOp("settings_set")).settings; }
+    if (t === "setup") { d.product = (await pgOp("product_show")).product; d.subs = (await pgOp("subs_edit")).subreddits; }
+    if (t === "settings") d.settings = (await pgOp("settings_set")).settings;
+    if (t === "brain") d.brain = await api("GET", "/pigeon/brain");
+    if (stale()) return;
+    Object.assign(me, d);
+  } catch (e) { if (!stale()) me.err = e.message; }
+  if (stale()) return;
+  if (!force && (editing() || me.dirty)) return pgBar();  // the user started typing while this refresh was in flight: don't wipe it
+  pgRender();
+}
+
+function pgBar() {
+  const st = PG.st, el = $("#pgbar"); if (!el || !st) return;
+  const on = st.state !== "idle", last = (st.log || []).slice(-1)[0];
+  el.innerHTML = `<span class="pill ${on ? "run" : ""}">🕊 ${esc(st.state)}${on && st.job ? " · " + esc(st.job) + (st.mode ? " " + esc(st.mode) : "") : ""}</span>
+    ${on ? `<button class="b d" onclick="pgGo(()=>pgApi('stop'),'stopping…')">Stop</button>` : ""}
+    <span class="mute small"> scanned ${st.stats.scanned} · leads ${st.stats.leads} · DMs ${st.stats.dms} · today ${st.daily.count} · team brain ${st.central ? "on" : "OFF"}</span>
+    ${last ? `<div class="log">${esc(last.msg)}</div>` : ""}
+    ${st.last && !st.last.ok && st.last.error ? `<div class="err small">${esc(st.last.kind)}: ${esc(st.last.error)}</div>` : ""}`;
+}
+
+function pgRender() {
+  const busy = PG.st && PG.st.state !== "idle";
+  $("#pg").innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Pigeon · profile ${PG.id}</h3><button class="b" onclick="$('#dlg').close()">Close</button></div>
+    <div id="pgbar" style="margin:8px 0"></div>
+    <div class="row" style="gap:4px;margin-bottom:10px">${pgTabs.map(t => `<button class="b ${PG.tab === t ? "p" : ""}" onclick="pgTab('${t}')">${t}</button>`).join("")}</div>
+    ${PG.err ? `<div class="err small">${esc(PG.err)}</div>` : ""}${PG.msg ? `<pre class="log">${esc(PG.msg)}</pre>` : ""}
+    <div>${({ leads: pgLeads, run: pgRun, comments: pgComments, messages: pgMessages, setup: pgSetup, settings: pgSettings, brain: pgBrain })[PG.tab](busy)}</div>`;
+  pgBar();
+}
+
+function pgLeads(busy) {
+  const L = PG.leads || [], shown = L.filter(l => PG.filter === "all" || l.status === PG.filter);
+  const sts = ["all", "queued", "draft", "ready", "sent", "replied", "failed", "skipped"];
+  return `<div class="row" style="margin-bottom:8px">
+    <select onchange="PG.filter=this.value;pgRender()">${sts.map(s => `<option ${PG.filter === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+    <button class="b" onclick="pgGo(()=>pgOp('lead_write',{all:true}))">Write all queued</button>
+    <button class="b" onclick="pgGo(()=>pgOp('lead_approve',{all:true}))">Approve all drafts</button>
+    <button class="b" onclick="pgExport()">Export CSV</button>
+    <button class="b d" onclick="if(confirm('Delete ALL leads?'))pgGo(()=>pgOp('leads_clear'))">Clear all</button></div>
+  ${shown.slice(0, 100).map(l => { const u = esc(l.username), sent = l.status === "sent" || l.status === "replied";
+    return `<div class="card" style="padding:10px;margin-bottom:8px"><div class="row"><a href="https://www.reddit.com/user/${u}" target="_blank"><b>u/${u}</b></a>
+      <span class="pill">${l.fit}</span><span class="pill">${esc(l.status)}</span><span class="mute small">${l.subreddit ? "r/" + esc(l.subreddit) : ""}</span></div>
+      <div class="small mute">${esc(l.reason)}${l.error ? ` <span class="err">· ${esc(l.error)}</span>` : ""}</div>
+      ${l.message || PG.edit[l.username] != null ? `<textarea style="width:100%;min-height:70px" ${sent ? "disabled" : ""} oninput="PG.edit['${u}']=this.value">${esc(PG.edit[l.username] ?? l.message)}</textarea>` : ""}
+      <div class="row" style="margin-top:6px">
+        ${PG.edit[l.username] != null ? `<button class="b p" onclick="pgSave('${u}')">Save</button>` : ""}
+        ${l.status === "queued" || l.status === "failed" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_write',{username:'${u}'}))">Write message</button>` : ""}
+        ${l.status === "draft" ? `<button class="b p" onclick="pgGo(()=>pgOp('lead_approve',{username:'${u}'}))">Approve</button>` : ""}
+        ${l.status === "draft" || l.status === "ready" ? `<button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('send',{username:'${u}'}),'sending…')">Send now</button>` : ""}
+        ${l.status === "sent" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_replied',{username:'${u}'}))">Mark replied</button>` : ""}
+        ${!sent && l.status !== "skipped" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_skip',{username:'${u}'}))">Skip</button>` : ""}</div></div>`; }).join("") || `<div class="mute">No leads here. Run the agent in “find” mode, scan a page, or import a list.</div>`}
+  <h4>List DMer</h4><div class="mute small">Usernames, one per line (or a CSV with usernames in the first column). People the team already contacted are skipped.</div>
+  <textarea id="pgimp" style="width:100%;min-height:60px"></textarea>
+  <button class="b" onclick="pgGo(()=>pgOp('leads_import',{text:$('#pgimp').value}))">Import to queue</button>`;
+}
+async function pgSave(u) { const m = PG.edit[u]; delete PG.edit[u]; await pgGo(() => pgOp("lead_edit", { username: u, message: m }), "saved"); }
+async function pgExport() {
+  const r = await pgOp("leads_export"); const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([r.csv], { type: "text/csv" })); a.download = "pigeon-leads.csv"; a.click();
+}
+
+function pgRun(busy) {
+  return `<div class="card" style="padding:12px"><b>Run the agent</b><div class="row" style="margin-top:8px">
+      <select id="pgmode"><option value="find">find leads</option><option value="dm">send approved DMs</option><option value="full">find + DM</option></select>
+      <input id="pgmin" type="number" placeholder="minutes (default from settings)" style="width:200px">
+      <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('run',{mode:$('#pgmode').value,minutes:parseFloat($('#pgmin').value)||null}),'started')">▶ Start</button></div>
+      <div class="mute small" style="margin-top:6px">The agent works in its own tab; your tabs are left alone. DMs and comments go through the daily cap and the team's shared memory.</div></div>
+    <div class="card" style="padding:12px;margin-top:10px"><b>Page DMer</b><div class="mute small">Queue everyone on the Reddit tab you're looking at.</div>
+      <label class="small"><input type="checkbox" id="pgns"> skip AI scoring</label>
+      <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('scan',{no_score:$('#pgns').checked}),'scanning…')">Queue everyone on this page</button></div>
+    <div class="card" style="padding:12px;margin-top:10px"><button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('replies'),'checking…')">Check replies</button></div>
+    <div class="card" style="padding:12px;margin-top:10px"><b>Reddit compatibility check</b>
+      <div class="mute small">Read-only: visits a feed, a post, a profile, the chat list and the submit page, and reports what Pigeon can't read. Run it first on a new account.</div>
+      <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('doctor'),'checking Reddit… (the report appears here)')">Run the check</button>
+      ${PG.st && PG.st.last && PG.st.last.kind === "doctor" && PG.st.last.out ? `<pre class="log">${esc(PG.st.last.out)}</pre>` : ""}</div>`;
+}
+
+function pgComments(busy) {
+  const O = PG.opps || [], I = PG.ideas || [];
+  return `<h4>Comment opportunities</h4>` + (O.map(o => `<div class="card" style="padding:10px;margin-bottom:8px"><div class="row"><b>r/${esc(o.subreddit)}</b> ${esc(o.title)}
+      <span class="pill">${esc(o.status)}</span><a class="small" href="${esc(o.post_url)}" target="_blank">thread ↗</a></div><div class="small mute">${esc(o.why)}</div>
+      <pre class="log">${esc(o.draft)}</pre>${o.status === "pending" ? `<div class="row"><button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('post',{id:${JSON.stringify(o.id).replace(/"/g, "&quot;")}}),'posting…')">Approve &amp; post</button>
+      <button class="b" onclick="pgGo(()=>pgOp('opp_skip',{id:${JSON.stringify(o.id).replace(/"/g, "&quot;")}}))">Skip</button></div>` : ""}</div>`).join("") || `<div class="mute">None yet. They're drafted while the agent browses.</div>`) +
+    `<h4>Post ideas</h4><button class="b" onclick="pgGo(()=>pgOp('ideas_generate'),'writing ideas…')">Generate 5 post ideas</button>` +
+    I.map(i => `<div class="card" style="padding:10px;margin:8px 0"><b>r/${esc(i.subreddit)}</b> — ${esc(i.title)}<pre class="log">${esc(i.body)}</pre><div class="small mute">${esc(i.angle)}</div>
+      <div class="row"><button class="b" onclick="navigator.clipboard.writeText(${JSON.stringify(i.title + "\n\n" + i.body).replace(/"/g, "&quot;")})">Copy</button>
+      <a class="b" href="https://www.reddit.com/r/${esc(i.subreddit)}/submit" target="_blank">Open submit page</a>
+      <button class="b p" ${busy ? "disabled" : ""} onclick="if(confirm('Submit this to r/${esc(i.subreddit)} now, from this account?'))pgGo(()=>pgJob('submit',{id:'${esc(i.id)}'}),'posting…')">Submit now</button>
+      <button class="b" onclick="pgGo(()=>pgOp('idea_posted',{id:'${esc(i.id)}'}))">I posted it myself</button></div></div>`).join("") +
+    ((PG.posted || []).length ? `<h4>Posted by the agent</h4>` + PG.posted.map(x => `<div class="small"><b>r/${esc(x.subreddit)}</b> ${esc(x.title)} <a href="${esc(x.url)}" target="_blank">thread ↗</a></div>`).join("") : "");
+}
+
+function pgMessages() {
+  const s = PG.settings || {}, t = PG.tpl || {};
+  return `<div class="row"><button class="b ${s.dm_mode === "ai" ? "p" : ""}" onclick="pgGo(()=>pgOp('settings_set',{pairs:{dm_mode:'ai'}}),'')">AI writes each DM</button>
+      <button class="b ${s.dm_mode === "template" ? "p" : ""}" onclick="pgGo(()=>pgOp('settings_set',{pairs:{dm_mode:'template'}}),'')">Use my template</button>
+      <label class="small"><input type="checkbox" ${s.approve_ai_drafts ? "checked" : ""} onchange="pgGo(()=>pgOp('settings_set',{pairs:{approve_ai_drafts:this.checked}}),'')"> AI drafts wait for my approval</label></div>
+    <h4>Template</h4><div class="mute small">{Hey|Hi|Hello} {name}, … — variables: {name} {subreddit} {topic}</div>
+    <textarea id="pgtpl" style="width:100%;min-height:110px">${esc(t.template || "")}</textarea>
+    <div class="row"><button class="b p" onclick="pgGo(()=>pgOp('template_set',{body:$('#pgtpl').value}),'saved')">Save</button>
+      <select id="pgint"><option>light</option><option selected>medium</option><option>heavy</option></select>
+      <button class="b" onclick="pgGo(()=>pgOp('template_spin',{intensity:$('#pgint').value}).then(r=>({out:'✨ spun. '+r.out})))">✨ Add spintax with AI</button>
+      <button class="b" onclick="pgGo(()=>pgOp('template_preview',{n:4}))">Preview variations</button>
+      ${t.undo ? `<button class="b" onclick="pgGo(()=>pgOp('template_undo'),'restored')">Undo AI spin</button>` : ""}</div>`;
+}
+
+function pgSetup(busy) {
+  const p = PG.product, S_ = PG.subs || [];
+  return `<div class="row"><input id="pgurl" placeholder="https://your-product.com" style="flex:1" value="${esc(p ? p.url : "")}">
+      <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('setup',{url:$('#pgurl').value}),'analyzing + finding subreddits…')">${p ? "Re-analyze" : "Analyze my product"}</button></div>
+    ${p ? `<div class="card small" style="padding:10px;margin:8px 0"><b>${esc(p.name)}</b> — ${esc(p.summary)}<br><span class="mute">ICP:</span> ${esc(p.icp)}<br><span class="mute">Offer:</span> ${esc(p.offer)}</div>` : ""}
+    <h4>Subreddits</h4><div class="row"><button class="b" ${busy || !p ? "disabled" : ""} onclick="pgGo(()=>pgJob('discover'),'finding subreddits…')">Re-run discovery</button>
+      <input id="pgadd" placeholder="add r/name" style="width:160px"><button class="b" onclick="pgGo(()=>pgOp('subs_edit',{add:[$('#pgadd').value]}),'')">Add</button></div>
+    <table style="margin-top:8px">${S_.map(x => `<tr><td><input type="checkbox" ${x.enabled ? "checked" : ""} onchange="pgGo(()=>pgOp('subs_edit',{[this.checked?'enable':'disable']:['${esc(x.name)}']}),'')"></td>
+      <td>r/${esc(x.name)}</td><td class="small">score ${x.score}</td><td class="small">rules: ${esc(x.rules_risk)}</td><td class="small mute">${esc(x.reason)}</td>
+      <td><button class="b" onclick="pgGo(()=>pgOp('subs_edit',{remove:['${esc(x.name)}']}),'')">✕</button></td></tr>`).join("") || `<tr><td class="mute">No subreddits yet.</td></tr>`}</table>`;
+}
+
+function pgSettings() {
+  const s = PG.settings || {};
+  return `<div style="display:grid;grid-template-columns:240px 1fr;gap:6px;max-width:560px">${Object.entries(s).filter(([k]) => k !== "warmup_start").map(([k, v]) =>
+    `<label class="small">${esc(k)}</label>${typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v)}">`}`).join("")}</div>
+    <div class="row" style="margin-top:10px"><button class="b p" onclick="pgSaveSettings()">Save settings</button>
+      <button class="b" onclick="pgGo(()=>pgOp('settings_set',{restart_warmup:true}),'warm-up restarted from today')">Restart warm-up from today</button></div>
+    <div class="mute small" style="margin-top:6px">The DeepSeek key stays on this machine: <code>loft pigeon config --deepseek-key KEY</code>.</div>`;
+}
+function pgSaveSettings() {
+  const pairs = {}; document.querySelectorAll("#pg [data-k]").forEach(el => { pairs[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; });
+  pgGo(() => pgOp("settings_set", { pairs }), "saved");
+}
+
+function pgBrain() {
+  const b = PG.brain; if (!b) return `<div class="mute">loading…</div>`;
+  const k = b.summary.by_kind, when = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `<div class="row" style="margin-bottom:6px"><button class="b" onclick="pgGo(()=>pgOp('brain_backfill'))">Record this account's past DMs &amp; comments</button>
+      <span class="mute small">so other accounts don't repeat them</span></div>
+    <div class="row" style="margin-bottom:6px"><button class="b" onclick="pgGo(()=>pgOp('team_pull',{force:true}))">Pull team setup</button>
+      <button class="b" onclick="if(confirm('Share the product, subreddits, template and shared settings of this account with the whole team?'))pgGo(()=>pgOp('team_publish'))">Publish this account's setup to the team</button>
+      <span class="mute small">team setup v${b.team_setup.version}${b.team_setup.product ? " · " + esc(b.team_setup.product) : ""} · ${b.team_setup.subreddits} subreddits ·
+        limits: ${Object.entries(b.team_setup.limits).map(([a, v]) => esc(a) + "=" + v).join(", ") || "none"}</span></div>
+    <div class="small" style="margin-bottom:6px"><b>Our accounts:</b> ${b.accounts.map(a => "u/" + esc(a.username) + " (" + esc(a.profile || "#" + a.profile_id) + ")").join(" · ") || '<span class="mute">none registered yet; they register when the agent runs</span>'}</div>
+    <div><b>Team memory · last ${b.summary.days} days, every account:</b> ${k.dm || 0} DMs · ${k.reply || 0} replies · ${k.comment || 0} comments · ${k.post || 0} posts · ${k.upvote || 0} upvotes
+      ${b.summary.stuck_claims ? `<span class="err"> · ${b.summary.stuck_claims} stuck claim(s)</span>` : ""}</div>
+    <table style="margin:8px 0"><tr><th>Subreddit</th><th>DMs</th><th>Replies</th><th>Comments</th><th>Posts</th><th>Upvotes</th><th>Last</th></tr>${b.summary.by_subreddit.map(r => `<tr><td>r/${esc(r.subreddit)}</td><td>${r.dms}</td><td>${r.replies}</td><td>${r.comments}</td><td>${r.posts}</td><td>${r.upvotes}</td><td class="small">${when(r.last_at)}</td></tr>`).join("")}</table>
+    <table><tr><th>Account</th><th>DMs</th><th>Replies</th><th>Comments</th><th>Posts</th><th>Upvotes</th></tr>${b.summary.by_profile.map(r => `<tr><td>${esc(r.profile || "-")}</td><td>${r.dms}</td><td>${r.replies}</td><td>${r.comments}</td><td>${r.posts}</td><td>${r.upvotes}</td></tr>`).join("")}</table>
+    <h4>Recent</h4><table>${b.events.map(e => `<tr><td class="small">${when(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.status)}</td><td>${esc(e.profile || "-")}</td><td>r/${esc(e.subreddit || "-")}</td><td class="small">${esc((e.kind === "dm" ? e.target : e.title || e.target).slice(0, 70))}</td></tr>`).join("") || `<tr><td class="mute">Nothing yet.</td></tr>`}</table>`;
+}
+
 setInterval(() => { if (S && S.signed_in && tab === "profiles" && !$("#dlg").open && !document.querySelector(".menu.open")) load().catch(() => {}); }, 3000);
 </script>
 </body>

@@ -344,6 +344,64 @@ class Client:
     def versions(self, pid: int) -> list:
         return self.j("GET", f"/profiles/{pid}/versions")
 
+    # ------------------------------------------------------------ pigeon: the team's shared memory (see loft/pigeon)
+    SEALED = "enc1:"
+
+    def seal_text(self, tid: int, text: str) -> str:
+        """Message text for the team memory, sealed with the team key: the server only ever holds ciphertext."""
+        return self.SEALED + crypto.enc_text(self.team_key(tid), text, f"pigeon-body:{tid}") if text else ""
+
+    def open_text(self, tid: int, text: str) -> str:
+        """Plain text passes through; sealed text is opened, or shows as [encrypted] if the key has since been rotated."""
+        if not text or not text.startswith(self.SEALED):
+            return text
+        try:
+            return crypto.dec_text(self.team_key(tid), text[len(self.SEALED):], f"pigeon-body:{tid}")
+        except Exception:
+            return "[encrypted]"
+
+    def pigeon_claim(self, tid: int, **fields) -> dict:
+        return self.j("POST", f"/teams/{tid}/pigeon/claim", fields)
+
+    def pigeon_finish(self, tid: int, eid: int, status: str, error: str = "") -> dict:
+        return self.j("POST", f"/teams/{tid}/pigeon/events/{eid}", {"status": status, "error": error})
+
+    def pigeon_seen(self, tid: int, kind: str, targets: list) -> dict:
+        return self.j("POST", f"/teams/{tid}/pigeon/seen", {"kind": kind, "targets": targets})["seen"]
+
+    def pigeon_events(self, tid: int, **params) -> list:
+        return self.j("GET", f"/teams/{tid}/pigeon/events", params={k: v for k, v in params.items() if v})
+
+    def pigeon_summary(self, tid: int, days: float = 14) -> dict:
+        return self.j("GET", f"/teams/{tid}/pigeon/summary", params={"days": days})
+
+    def pigeon_set_account(self, tid: int, pid: int, username: str) -> dict:
+        return self.j("PUT", f"/teams/{tid}/pigeon/accounts/{pid}", {"username": username})
+
+    def pigeon_accounts(self, tid: int) -> list:
+        return self.j("GET", f"/teams/{tid}/pigeon/accounts")
+
+    def pigeon_config(self, tid: int) -> dict:
+        """{version, setup (decrypted, or None), unreadable, limits, updated}. `unreadable` = a setup exists but this key can't open it."""
+        r = self.j("GET", f"/teams/{tid}/pigeon/config")
+        setup, unreadable = None, False
+        if r["setup"]:
+            try:
+                setup = self._dec(tid, r["setup"], "pigeon-setup")
+            except Exception:
+                unreadable = True
+        return {"version": r["version"], "setup": setup, "unreadable": unreadable, "limits": r["limits"], "updated": r["updated"]}
+
+    def pigeon_put_config(self, tid: int, base_version: int, setup: Optional[dict] = None, limits: Optional[dict] = None) -> dict:
+        body: dict = {"base_version": base_version}
+        if limits is not None:
+            body["limits"] = limits
+        if setup is None:
+            return self.j("PUT", f"/teams/{tid}/pigeon/config", body)
+        body["setup"] = self._enc(tid, setup, "pigeon-setup")
+        return self._write(tid, lambda: self.j("PUT", f"/teams/{tid}/pigeon/config", {**body, "setup": self._enc(tid, setup, "pigeon-setup")},
+                                               headers=self._eh(tid)))
+
 
 def rotate_team_key(c: "Client", tid: int, log=print) -> dict:
     """Re-key a team: new key, everything re-encrypted, key sealed to each remaining member.
@@ -377,11 +435,14 @@ def rotate_team_key(c: "Client", tid: int, log=print) -> dict:
         runs = [{"id": r["id"], "payload": crypto.enc_text(new, crypto.dec_text(old, r["secret"], f"runner:{tid}"),
                                                            f"runner:{tid}")}
                 for r in c.j("GET", f"/teams/{tid}/runners")]
+        pcfg = c.j("GET", f"/teams/{tid}/pigeon/config")
+        pigeon_setup = (crypto.enc_text(new, crypto.dec_text(old, pcfg["setup"], f"pigeon-setup:{tid}"), f"pigeon-setup:{tid}")
+                        if pcfg["setup"] else None)
         me_id = c.j("GET", "/me")["id"]
         grants = [{"user_id": m["user_id"], "sealed": crypto.b64e(crypto.seal(crypto.b64d(m["pubkey"]), new))}
                   for m in st["members"] if m["user_id"] != me_id and m.get("pubkey")]
         out = c.j("POST", f"/teams/{tid}/rotation/commit", {
-            "epoch": epoch, "grants": grants, "templates": tpls, "runners": runs,
+            "epoch": epoch, "grants": grants, "templates": tpls, "runners": runs, "pigeon_setup": pigeon_setup,
             "self_wrapped": crypto.b64e(crypto.encrypt(c.vault, new, f"teamkey:{tid}:{epoch}"))})
     except BaseException:
         try:

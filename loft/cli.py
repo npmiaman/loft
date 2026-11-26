@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import getpass
 import json
 import runpy
@@ -238,6 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("rotate-key", help="admin: new team key, re-encrypt everything, re-key remaining members")
     sub.add_parser("apikey", help="show the local automation API key (desktop app /v1)")
     sub.add_parser("fetch-browser", help="download the Camoufox browser (~1.3 GB)")
+    from .pigeon.cli import register as register_pigeon
+    register_pigeon(sub)
     return ap
 
 
@@ -299,6 +302,10 @@ def main(argv=None) -> None:
         print(f"signed in to {server} as {args.email}")
         return
 
+    if args.cmd == "pigeon" and args.pcmd == "config":  # the DeepSeek key lives on this machine only: no sign-in needed
+        from .pigeon.cli import handle
+        return handle(args, None)
+
     c = Client(persist=True)
     if not c.token:
         raise SystemExit("not signed in: `loft login EMAIL --server URL`")
@@ -332,6 +339,10 @@ def main(argv=None) -> None:
         p = import_bundle(c, tid, blob, pw, args.name)
         print(f"imported as profile {p['id']}: {p['name']} (v{p['version']})")
         return
+
+    if args.cmd == "pigeon":
+        from .pigeon.cli import handle
+        return handle(args, c, lambda: _team(c, cfg, args.team))
 
     tid = _team(c, cfg, args.team)
     if args.cmd == "invite":
@@ -386,7 +397,7 @@ def main(argv=None) -> None:
         _print_profiles([c.patch_profile(args.id, **fields)])
     elif args.cmd == "run":
         from .engine import run_profile
-        run_profile(c, args.id, headless=args.headless)
+        run_profile(c, args.id, headless=args.headless or os.environ.get("LOFT_HEADLESS") == "1")  # env: for servers and tests
     elif args.cmd == "exec":
         from .engine import open_profile
         with open_profile(c, args.id, headless=args.headless) as context:
