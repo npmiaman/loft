@@ -408,6 +408,12 @@ def make_app() -> FastAPI:
         c = client()
         return c.remove_member(team(c), uid)
 
+    @app.post("/api/rotate-key")
+    def rotate_key():
+        from .client import rotate_team_key
+        c = client()
+        return rotate_team_key(c, team(c), log=lambda m: None)
+
     @app.get("/api/audit")
     def audit():
         c = client()

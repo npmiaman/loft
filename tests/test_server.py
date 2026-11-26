@@ -4,6 +4,9 @@ from loft.client import LoftError
 from loft.engine import pack, unpack
 from tests.conftest import FP
 
+# Every server test runs twice: SQLite + files, and real Postgres + S3 (moto).
+pytestmark = pytest.mark.usefixtures("backend")
+
 
 def team_of_three(mk):
     """owner, admin and member in one team. Signup is invite-only after the first user."""
@@ -228,3 +231,110 @@ def test_templates_and_runners_are_encrypted(mk):
     owner.add_runner(tid, "eu-1", "https://runner.example:4420", "RUNNERKEY")
     assert member.runners(tid)[0]["secret"] == "RUNNERKEY"
     assert "RUNNERKEY" not in str(owner.j("GET", f"/teams/{tid}/runners"))
+
+
+# ---------------------------------------------------------------- key rotation
+from loft import crypto  # noqa: E402
+from loft.client import rotate_team_key  # noqa: E402
+
+
+def test_rotation_locks_out_removed_member(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p = owner.create_profile(tid, name="x", fingerprint=FP, proxy={"server": "http://h:1", "username": "u", "password": "PW"})
+    lk = owner.lock(p["id"])["lock"]
+    owner.upload(p["id"], lk, 0, b"SESSION-1")
+    owner.unlock(p["id"], lk)
+    owner.add_template(tid, "t", {"os": "linux"})
+    owner.add_runner(tid, "r", "https://r:1", "RKEY")
+    owner.share(p["id"], ids["mem@x.io"], "run")
+    old_key = member.team_key(tid)  # the member has the key...
+    owner.remove_member(tid, ids["mem@x.io"])  # ...and keeps it after being removed
+    out = rotate_team_key(owner, tid, log=lambda m: None)
+    assert out["epoch"] == 2 and set(out["rekeyed"]) == {ids["admin@x.io"]}
+    # everything on the server is now under the new key: the old one opens nothing
+    raw = owner.j("GET", f"/profiles/{p['id']}/launch")
+    blob = owner.req("GET", f"/profiles/{p['id']}/data").content
+    for ct, aad in ((raw["fingerprint"], f"fp:{tid}"), (raw["proxy"], f"proxy:{tid}")):
+        with pytest.raises(Exception):
+            crypto.dec_text(old_key, ct, aad)
+    with pytest.raises(Exception):
+        crypto.decrypt(old_key, blob, f"data:{tid}:{p['id']}")
+    assert len(owner.versions(p["id"])) == 1  # old-key snapshots are gone
+    # the owner and the remaining admin carry on, admin via the sealed grant
+    assert owner.download(p["id"])[1] == b"SESSION-1"
+    assert admin.download(p["id"])[1] == b"SESSION-1"  # admin had the old key cached: refreshes by itself
+    assert admin.launch_info(p["id"])["proxy"]["password"] == "PW"
+    assert admin.templates(tid)[0]["settings"] == {"os": "linux"} and admin.runners(tid)[0]["secret"] == "RKEY"
+    fresh = mk()
+    fresh.login("admin@x.io", "password1")  # new device: sealed grant was converted to a vault copy
+    assert fresh.launch_info(p["id"])["fingerprint"] == FP
+
+
+def test_rotation_refused_while_running_and_blocks_locks(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p = owner.create_profile(tid, name="x", fingerprint=FP)
+    lk = admin.lock(p["id"])["lock"]
+    with pytest.raises(LoftError, match="stop running profiles first"):
+        rotate_team_key(owner, tid, log=lambda m: None)
+    admin.unlock(p["id"], lk)
+    owner.j("POST", f"/teams/{tid}/rotation/start")
+    with pytest.raises(LoftError) as e:
+        admin.lock(p["id"])
+    assert e.value.status == 423
+    with pytest.raises(LoftError) as e:  # half-done rotation can't be committed
+        owner.j("POST", f"/teams/{tid}/rotation/commit", {"epoch": 2, "self_wrapped": "x"})
+    assert "not re-encrypted" in e.value.detail
+    owner.j("POST", f"/teams/{tid}/rotation/abort")
+    admin.lock(p["id"])
+    assert owner.team_epoch(tid) == 1
+
+
+def test_stale_key_writes_rejected_then_retried(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    admin.team_key(tid)  # cache epoch-1 key
+    rotate_team_key(owner, tid, log=lambda m: None)
+    assert admin.keys[tid][0] == 1  # still stale in memory
+    # a raw write with the old epoch is refused...
+    with pytest.raises(LoftError, match="team key rotated"):
+        admin.j("POST", f"/teams/{tid}/profiles", {"name": "x", "fingerprint": "x"}, headers={"X-Key-Epoch": "1"})
+    # ...and the client recovers transparently, writing under the new key
+    p = admin.create_profile(tid, name="after", fingerprint=FP, proxy={"server": "http://h:1"})
+    assert admin.keys[tid][0] == 2
+    assert owner.launch_info(p["id"])["fingerprint"] == FP
+
+
+def test_rotation_revokes_old_invites(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    code = owner.invite(tid)["code"]
+    rotate_team_key(owner, tid, log=lambda m: None)
+    with pytest.raises(LoftError, match="invite invalid"):
+        mk().register("late@x.io", "password1", invite=code)
+    new = owner.invite(tid)["code"]
+    late = mk()
+    late.register("late@x.io", "password1", invite=new)
+    assert late.team_epoch(tid) == 2
+
+
+def test_concurrent_lock_has_one_winner(mk):
+    import threading
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p = owner.create_profile(tid, name="race", fingerprint=FP)
+    clients = []
+    for i in range(12):
+        c = mk(owner.token)
+        c.device = f"dev-{i}"
+        clients.append(c)
+    wins, losses, start = [], [], threading.Barrier(len(clients))
+
+    def go(c):
+        start.wait()
+        try:
+            c.lock(p["id"])
+            wins.append(c.device)
+        except LoftError as e:
+            losses.append(e.status)
+
+    ts = [threading.Thread(target=go, args=(c,)) for c in clients]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(wins) == 1 and losses == [409] * 11

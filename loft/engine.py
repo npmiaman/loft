@@ -112,6 +112,42 @@ def check_proxy(proxy: dict, timeout: float = 15, samples: int = 3) -> dict:
     return {"ok": False, "error": "; ".join(errors)}
 
 
+# Countries whose desktop browsers mostly run in English even though another language is official/most spoken.
+ENGLISH_BROWSER_COUNTRIES = {"IN", "PK", "BD", "NG", "KE", "GH", "PH", "SG", "MY", "ZA", "LK", "NP", "UG", "TZ", "ZW"}
+
+
+def country_locale(cc: str, seed: str = "") -> list[str]:
+    """Browser languages for a profile appearing from country `cc`.
+
+    Camoufox picks a random locale on every launch, weighted by who *speaks* each language
+    (it gave de-NL for a Dutch IP), so one profile showed different languages across sessions.
+    Here: the country's official language (deterministic per profile when there are several),
+    plus English the way real browsers list it."""
+    import hashlib
+    import xml.etree.ElementTree as ET
+    from importlib.resources import files
+    cc = cc.upper()
+    if cc in ENGLISH_BROWSER_COUNTRIES:
+        return [f"en-{cc}", "en"]
+    root = ET.parse(files("camoufox") / "territoryInfo.xml").getroot()
+    terr = root.find(f".//territory[@type='{cc}']")
+    langs = []
+    if terr is not None:
+        for lp in terr.findall("languagePopulation"):
+            if lp.get("officialStatus") in ("official", "de_facto_official"):
+                code = lp.get("type").split("_")[0]
+                langs.append((float(lp.get("populationPercent", 0)), {"gsw": "de"}.get(code, code)))
+    if not langs:
+        return ["en-US", "en"]
+    langs.sort(reverse=True)
+    top = [l for p, l in langs if p >= langs[0][0] * 0.5] or [langs[0][1]]  # e.g. CH: de/fr, BE: nl/fr
+    lang = top[int(hashlib.sha256(f"{seed}:{cc}".encode()).hexdigest(), 16) % len(top)]
+    out = [f"{lang}-{cc}", lang]
+    if lang != "en":
+        out += ["en-US", "en"]
+    return out
+
+
 def host_os() -> str:
     import sys
     return {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
@@ -138,6 +174,27 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
         raise LoftError(400, f"canvas 'real' needs a {host_os()} profile on this machine; this one is {info.get('os')}")
     if proxy:
         opts["proxy"] = {k: v for k, v in proxy.items() if k in ("server", "username", "password", "bypass") and v}
+    return opts
+
+
+def prepare_launch(info: dict, user_data_dir: Path, headless: bool = False, seed: str = "",
+                   log: Callable[[str], None] = print) -> dict:
+    """Camoufox options for a profile, with a live proxy check: the measured exit IP drives
+    timezone, geolocation and WebRTC, and the browser language is the exit country's, stable per profile."""
+    opts = camoufox_options(info, user_data_dir, headless)
+    if info.get("proxy"):
+        chk = check_proxy(info["proxy"])
+        if not chk["ok"]:
+            raise LoftError(502, f"proxy not working: {chk['error']}")
+        opts["geoip"] = chk["ip"]
+        log(f"proxy exit {chk['ip']} ({chk['ms']} ms)")
+        if chk.get("warning"):
+            log("WARNING: " + chk["warning"])
+        try:
+            from camoufox.geolocation import get_geolocation
+            opts["locale"] = country_locale(get_geolocation(chk["ip"]).locale.region, seed=seed)
+        except Exception as e:
+            log(f"locale lookup failed ({e}); using Camoufox's")
     return opts
 
 
@@ -182,15 +239,7 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
         threading.Thread(target=beat, daemon=True).start()
 
         from camoufox.sync_api import Camoufox
-        opts = camoufox_options(info, local.data, headless)
-        if info.get("proxy"):
-            chk = check_proxy(info["proxy"])
-            if not chk["ok"]:
-                raise LoftError(502, f"proxy not working: {chk['error']}")
-            opts["geoip"] = chk["ip"]  # timezone/locale/geo + WebRTC IP from the exit IP pages will see
-            log(f"proxy exit {chk['ip']} ({chk['ms']} ms)")
-            if chk.get("warning"):
-                log("WARNING: " + chk["warning"])
+        opts = prepare_launch(info, local.data, headless, seed=str(pid), log=log)
         log(f"launching '{info['name']}'" + (f" via {info['proxy']['server']}" if info.get("proxy") else ""))
         err: Optional[BaseException] = None
         with Camoufox(**opts) as context:

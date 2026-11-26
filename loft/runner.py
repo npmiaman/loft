@@ -39,6 +39,7 @@ class StartIn(BaseModel):
     token: str
     team_id: int
     team_key: str
+    key_epoch: int
     profile_id: int
     ca: Optional[str] = None  # PEM text of the Loft server's CA, if self-signed
 
@@ -183,7 +184,7 @@ def create_runner(key: str) -> FastAPI:
             ca_path = f.name
         c = Client(server=body.server, token=body.token, ca=ca_path)
         c.device = "cloud-runner"
-        c.keys[body.team_id] = crypto.b64d(body.team_key)
+        c.keys[body.team_id] = (body.key_epoch, crypto.b64d(body.team_key))
         me = c.me()
         s = Session(c, body.profile_id, me["email"])
         sessions[s.id] = s
@@ -269,7 +270,8 @@ def start_cloud_session(client: Client, pid: int, runner: dict) -> dict:
     r = httpx.post(runner["url"] + "/sessions", headers={"X-Runner-Key": runner["secret"]}, timeout=60,
                    verify=client.ca or True,
                    json={"server": client.server, "token": client.token, "team_id": tid,
-                         "team_key": crypto.b64e(client.team_key(tid)), "profile_id": pid, "ca": ca_text})
+                         "team_key": crypto.b64e(client.team_key(tid)), "key_epoch": client.team_epoch(tid),
+                         "profile_id": pid, "ca": ca_text})
     if r.status_code >= 400:
         try:
             detail = r.json().get("detail", r.text)

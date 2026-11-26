@@ -51,7 +51,10 @@ class Client:
         self.token = token if token is not None else cfg.get("token")
         self.device = cfg.get("device") or platform.node() or "device"
         self.vault = crypto.b64d(cfg["vault_key"]) if cfg.get("vault_key") else None
-        self.keys: dict[int, bytes] = {int(k): crypto.b64d(v) for k, v in cfg.get("keys", {}).items()}
+        self.keys: dict[int, tuple[int, bytes]] = {}  # team id -> (key epoch, key)
+        for k, v in cfg.get("keys", {}).items():
+            if isinstance(v, dict):
+                self.keys[int(k)] = (int(v["e"]), crypto.b64d(v["k"]))
         self.ca = ca or cfg.get("ca")
         verify: Any = self.ca if self.ca else True
         self.http = httpx.Client(base_url=self.server, timeout=300, transport=transport, verify=verify)
@@ -63,7 +66,7 @@ class Client:
         cfg = load_config()
         cfg.update(server=self.server, token=self.token,
                    vault_key=crypto.b64e(self.vault) if self.vault else None,
-                   keys={str(k): crypto.b64e(v) for k, v in self.keys.items()})
+                   keys={str(k): {"e": e, "k": crypto.b64e(v)} for k, (e, v) in self.keys.items()})
         if self.ca:
             cfg["ca"] = self.ca
         save_config(cfg)
@@ -89,24 +92,51 @@ class Client:
 
     # ------------------------------------------------------------ keys
     def team_key(self, tid: int) -> bytes:
-        if tid in self.keys:
-            return self.keys[tid]
+        return self._key(tid)[1]
+
+    def team_epoch(self, tid: int) -> int:
+        return self._key(tid)[0]
+
+    def _key(self, tid: int) -> tuple[int, bytes]:
+        if tid not in self.keys:
+            self._fetch_key(tid)
+        return self.keys[tid]
+
+    def refresh_key(self, tid: int) -> tuple[int, bytes]:
+        self.keys.pop(tid, None)
+        return self._key(tid)
+
+    def _keypair(self) -> tuple[bytes, bytes]:
+        me = self.j("GET", "/me")
+        if not me.get("pubkey"):
+            raise LoftError(403, "no keypair on this account yet: sign in again")
+        priv = crypto.decrypt(self.vault, crypto.b64d(me["privkey"]), f"privkey:{me['id']}")
+        return priv, crypto.b64d(me["pubkey"])
+
+    def _fetch_key(self, tid: int) -> None:
         if not self.vault:
             raise LoftError(401, "sign in again to unlock team keys")
         try:
-            wrapped = self.j("GET", f"/teams/{tid}/keys/me")["wrapped"]
+            r = self.j("GET", f"/teams/{tid}/keys/me")
         except LoftError as e:
             if e.status == 404:
-                raise LoftError(403, "you don't have this team's key: join with the full invite code (code.key)")
+                raise LoftError(403, "you don't have this team's current key: join with the full invite code "
+                                     "(code.key), or ask an admin to rotate the key")
             raise
-        self.keys[tid] = crypto.decrypt(self.vault, crypto.b64d(wrapped), f"teamkey:{tid}")
-        self._save()
-        return self.keys[tid]
+        if r["kind"] == "sealed":  # granted by a key rotation: open with our private key, then keep a vault copy
+            priv, pub = self._keypair()
+            key = crypto.unseal(priv, pub, crypto.b64d(r["wrapped"]))
+            self._store_key(tid, key, r["epoch"])
+        else:
+            key = crypto.decrypt(self.vault, crypto.b64d(r["wrapped"]), f"teamkey:{tid}:{r['epoch']}")
+            self.keys[tid] = (r["epoch"], key)
+            self._save()
 
-    def _store_key(self, tid: int, key: bytes) -> None:
-        self.keys[tid] = key
+    def _store_key(self, tid: int, key: bytes, epoch: int) -> None:
+        self.keys[tid] = (epoch, key)
         if self.vault:
-            self.j("PUT", f"/teams/{tid}/keys/me", {"wrapped": crypto.b64e(crypto.encrypt(self.vault, key, f"teamkey:{tid}"))})
+            self.j("PUT", f"/teams/{tid}/keys/me", {"epoch": epoch, "wrapped": crypto.b64e(
+                crypto.encrypt(self.vault, key, f"teamkey:{tid}:{epoch}"))})
         self._save()
 
     def _enc(self, tid: int, obj: Any, purpose: str) -> str:
@@ -115,7 +145,24 @@ class Client:
     def _dec(self, tid: int, s: Optional[str], purpose: str) -> Any:
         if not s:
             return None
-        return json.loads(crypto.dec_text(self.team_key(tid), s, f"{purpose}:{tid}"))
+        try:
+            return json.loads(crypto.dec_text(self.team_key(tid), s, f"{purpose}:{tid}"))
+        except Exception:  # maybe the key was rotated since we cached it
+            self.refresh_key(tid)
+            return json.loads(crypto.dec_text(self.team_key(tid), s, f"{purpose}:{tid}"))
+
+    def _write(self, tid: int, fn):
+        """Run an encrypted write; if the team key rotated meanwhile, refresh it and redo the write."""
+        try:
+            return fn()
+        except LoftError as e:
+            if e.status == 409 and "team key rotated" in e.detail:
+                self.refresh_key(tid)
+                return fn()
+            raise
+
+    def _eh(self, tid: int) -> dict:
+        return {"X-Key-Epoch": str(self.team_epoch(tid))}
 
     def _profile(self, p: dict) -> dict:
         p = dict(p)
@@ -130,6 +177,11 @@ class Client:
         self.token = out["token"]
         self.vault = crypto.vault_key(password, out["vault_salt"])
         self.keys = {}
+        me = self.j("GET", "/me")
+        if not me.get("pubkey"):
+            priv, pub = crypto.new_keypair()
+            self.j("PUT", "/me/keypair", {"pubkey": crypto.b64e(pub), "privkey": crypto.b64e(
+                crypto.encrypt(self.vault, priv, f"privkey:{me['id']}"))})
         self._save()
         return out
 
@@ -138,8 +190,11 @@ class Client:
         out = self.j("POST", "/auth/register", {"email": email, "password": password, "name": name, "invite": code})
         self._after_auth(out, password)
         if code and key:
-            self._store_key(out["team_id"], key)
+            self._store_key(out["team_id"], key, self._invite_epoch(out["team_id"]))
         return out
+
+    def _invite_epoch(self, tid: int) -> int:
+        return next(t["key_epoch"] for t in self.me()["teams"] if t["id"] == tid)
 
     def login(self, email: str, password: str) -> dict:
         return self._after_auth(self.j("POST", "/auth/login", {"email": email, "password": password}), password)
@@ -150,7 +205,7 @@ class Client:
     # ------------------------------------------------------------ teams
     def create_team(self, name: str) -> dict:
         t = self.j("POST", "/teams", {"name": name})
-        self._store_key(t["id"], crypto.new_key())
+        self._store_key(t["id"], crypto.new_key(), t["key_epoch"])
         return t
 
     def members(self, tid: int) -> list:
@@ -158,6 +213,8 @@ class Client:
 
     def invite(self, tid: int, role: str = "member") -> dict:
         out = self.j("POST", f"/teams/{tid}/invites", {"role": role})
+        if out["epoch"] != self.team_epoch(tid):
+            self.refresh_key(tid)
         out["code"] = f"{out['code']}.{crypto.b64e(self.team_key(tid))}"
         return out
 
@@ -166,7 +223,7 @@ class Client:
         if not key:
             raise LoftError(400, "invite is missing its key part (expected code.key)")
         out = self.j("POST", f"/invites/{code}/accept")
-        self._store_key(out["team_id"], key)
+        self._store_key(out["team_id"], key, self._invite_epoch(out["team_id"]))
         return out
 
     def set_role(self, tid: int, uid: int, role: str) -> dict:
@@ -183,9 +240,11 @@ class Client:
         return [self._profile(p) for p in self.j("GET", f"/teams/{tid}/profiles")]
 
     def create_profile(self, tid: int, *, name: str, fingerprint: dict, proxy: Optional[dict] = None, **fields) -> dict:
-        body = dict(fields, name=name, fingerprint=self._enc(tid, fingerprint, "fp"),
-                    proxy=self._enc(tid, proxy, "proxy") if proxy else None)
-        return self._profile(self.j("POST", f"/teams/{tid}/profiles", body))
+        def go():
+            body = dict(fields, name=name, fingerprint=self._enc(tid, fingerprint, "fp"),
+                        proxy=self._enc(tid, proxy, "proxy") if proxy else None)
+            return self.j("POST", f"/teams/{tid}/profiles", body, headers=self._eh(tid))
+        return self._profile(self._write(tid, go))
 
     def profile(self, pid: int) -> dict:
         return self._profile(self.j("GET", f"/profiles/{pid}"))
@@ -196,9 +255,14 @@ class Client:
         return info
 
     def patch_profile(self, pid: int, proxy: Optional[dict] = None, **fields) -> dict:
-        if proxy is not None:
-            fields["proxy"] = self._enc(self.j("GET", f"/profiles/{pid}")["team_id"], proxy, "proxy")
-        return self._profile(self.j("PATCH", f"/profiles/{pid}", fields))
+        if proxy is None:
+            return self._profile(self.j("PATCH", f"/profiles/{pid}", fields))
+        tid = self.j("GET", f"/profiles/{pid}")["team_id"]
+
+        def go():
+            return self.j("PATCH", f"/profiles/{pid}", dict(fields, proxy=self._enc(tid, proxy, "proxy")),
+                          headers=self._eh(tid))
+        return self._profile(self._write(tid, go))
 
     def delete_profile(self, pid: int) -> dict:
         return self.j("DELETE", f"/profiles/{pid}")
@@ -220,7 +284,8 @@ class Client:
         return out
 
     def add_template(self, tid: int, name: str, settings: dict) -> dict:
-        return self.j("POST", f"/teams/{tid}/templates", {"name": name, "payload": self._enc(tid, settings, "template")})
+        return self._write(tid, lambda: self.j("POST", f"/teams/{tid}/templates", {
+            "name": name, "payload": self._enc(tid, settings, "template")}, headers=self._eh(tid)))
 
     def delete_template(self, xid: int) -> dict:
         return self.j("DELETE", f"/templates/{xid}")
@@ -231,7 +296,8 @@ class Client:
                 for r in self.j("GET", f"/teams/{tid}/runners")]
 
     def add_runner(self, tid: int, name: str, url: str, secret: str) -> dict:
-        return self.j("POST", f"/teams/{tid}/runners", {"name": name, "url": url, "secret": self._enc(tid, secret, "runner")})
+        return self._write(tid, lambda: self.j("POST", f"/teams/{tid}/runners", {
+            "name": name, "url": url, "secret": self._enc(tid, secret, "runner")}, headers=self._eh(tid)))
 
     def delete_runner(self, rid: int) -> dict:
         return self.j("DELETE", f"/runners/{rid}")
@@ -249,10 +315,13 @@ class Client:
 
     def upload(self, pid: int, lock: str, base_version: int, data: bytes, tid: Optional[int] = None) -> dict:
         tid = tid if tid is not None else self.j("GET", f"/profiles/{pid}")["team_id"]
-        blob = crypto.encrypt(self.team_key(tid), data, f"data:{tid}:{pid}")
-        return self.req("PUT", f"/profiles/{pid}/data", content=blob,
-                        headers={"X-Lock": lock, "X-Base-Version": str(base_version),
-                                 "Content-Type": "application/octet-stream"}).json()
+
+        def go():
+            blob = crypto.encrypt(self.team_key(tid), data, f"data:{tid}:{pid}")
+            return self.req("PUT", f"/profiles/{pid}/data", content=blob,
+                            headers={"X-Lock": lock, "X-Base-Version": str(base_version),
+                                     "Content-Type": "application/octet-stream", **self._eh(tid)}).json()
+        return self._write(tid, go)
 
     def download(self, pid: int, version: Optional[int] = None, tid: Optional[int] = None) -> tuple[int, Optional[bytes]]:
         r = self.req("GET", f"/profiles/{pid}/data", params={"version": version} if version else None)
@@ -260,10 +329,64 @@ class Client:
         if r.status_code != 200:
             return v, None
         tid = tid if tid is not None else self.j("GET", f"/profiles/{pid}")["team_id"]
-        return v, crypto.decrypt(self.team_key(tid), r.content, f"data:{tid}:{pid}")
+        try:
+            return v, crypto.decrypt(self.team_key(tid), r.content, f"data:{tid}:{pid}")
+        except Exception:
+            self.refresh_key(tid)
+            return v, crypto.decrypt(self.team_key(tid), r.content, f"data:{tid}:{pid}")
 
     def versions(self, pid: int) -> list:
         return self.j("GET", f"/profiles/{pid}/versions")
+
+
+def rotate_team_key(c: "Client", tid: int, log=print) -> dict:
+    """Re-key a team: new key, everything re-encrypted, key sealed to each remaining member.
+
+    Members removed before this keep only the old key, which no longer opens anything on the server
+    (data they already downloaded stays theirs: no crypto can take that back)."""
+    old_epoch, old = c._key(tid)
+    try:
+        st = c.j("POST", f"/teams/{tid}/rotation/start")
+    except LoftError as e:
+        raise LoftError(e.status, f"can't start rotation: {e.detail}")
+    epoch, new = st["epoch"], crypto.new_key()
+    try:
+        for i, p in enumerate(st["profiles"], 1):
+            info = c.j("GET", f"/profiles/{p['id']}/launch")
+            fp = crypto.dec_text(old, info["fingerprint"], f"fp:{tid}")
+            proxy = crypto.dec_text(old, info["proxy"], f"proxy:{tid}") if info.get("proxy") else None
+            if p["version"] > 0:
+                r = c.req("GET", f"/profiles/{p['id']}/data")
+                data = crypto.decrypt(old, r.content, f"data:{tid}:{p['id']}")
+                c.req("PUT", f"/teams/{tid}/rotation/profiles/{p['id']}/data",
+                      content=crypto.encrypt(new, data, f"data:{tid}:{p['id']}"),
+                      headers={"Content-Type": "application/octet-stream"})
+            c.j("PUT", f"/teams/{tid}/rotation/profiles/{p['id']}", {
+                "fingerprint": crypto.enc_text(new, fp, f"fp:{tid}"),
+                "proxy": crypto.enc_text(new, proxy, f"proxy:{tid}") if proxy else None})
+            log(f"re-encrypted profile {i}/{len(st['profiles'])}")
+        tpls = [{"id": t["id"], "payload": crypto.enc_text(new, crypto.dec_text(old, t["payload"], f"template:{tid}"),
+                                                           f"template:{tid}")}
+                for t in c.j("GET", f"/teams/{tid}/templates")]
+        runs = [{"id": r["id"], "payload": crypto.enc_text(new, crypto.dec_text(old, r["secret"], f"runner:{tid}"),
+                                                           f"runner:{tid}")}
+                for r in c.j("GET", f"/teams/{tid}/runners")]
+        me_id = c.j("GET", "/me")["id"]
+        grants = [{"user_id": m["user_id"], "sealed": crypto.b64e(crypto.seal(crypto.b64d(m["pubkey"]), new))}
+                  for m in st["members"] if m["user_id"] != me_id and m.get("pubkey")]
+        out = c.j("POST", f"/teams/{tid}/rotation/commit", {
+            "epoch": epoch, "grants": grants, "templates": tpls, "runners": runs,
+            "self_wrapped": crypto.b64e(crypto.encrypt(c.vault, new, f"teamkey:{tid}:{epoch}"))})
+    except BaseException:
+        try:
+            c.j("POST", f"/teams/{tid}/rotation/abort")
+        except Exception:
+            pass
+        raise
+    c.keys[tid] = (epoch, new)
+    c._save()
+    log(f"team key rotated: epoch {old_epoch} -> {epoch}")
+    return out
 
 
 def _split_invite(invite: Optional[str]) -> tuple[Optional[str], Optional[bytes]]:

@@ -59,3 +59,38 @@ def vault_key(password: str, salt_b64: str) -> bytes:
 
 def passphrase_key(passphrase: str, salt: bytes) -> bytes:
     return hashlib.scrypt(passphrase.encode(), salt=salt, n=2**15, r=8, p=1, maxmem=64 * 1024 * 1024, dklen=32)
+
+
+# ---------------------------------------------------------------- per-user keypairs (key rotation)
+# A rotated team key is sealed to each remaining member's X25519 public key, so an admin can
+# re-key the whole team without knowing anyone's password, and removed members get nothing.
+def new_keypair() -> tuple[bytes, bytes]:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    priv = X25519PrivateKey.generate()
+    raw = serialization.Encoding.Raw
+    return (priv.private_bytes(raw, serialization.PrivateFormat.Raw, serialization.NoEncryption()),
+            priv.public_key().public_bytes(raw, serialization.PublicFormat.Raw))
+
+
+def _seal_key(shared: bytes, eph_pub: bytes, recipient_pub: bytes) -> bytes:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=eph_pub + recipient_pub, info=b"loft-seal-v1").derive(shared)
+
+
+def seal(recipient_pub: bytes, data: bytes) -> bytes:
+    """Anonymous sealed box: ephemeral X25519 + HKDF-SHA256 + AES-256-GCM."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+    eph = X25519PrivateKey.generate()
+    eph_pub = eph.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    shared = eph.exchange(X25519PublicKey.from_public_bytes(recipient_pub))
+    return eph_pub + encrypt(_seal_key(shared, eph_pub, recipient_pub), data, "seal")
+
+
+def unseal(priv: bytes, pub: bytes, blob: bytes) -> bytes:
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+    eph_pub = blob[:32]
+    shared = X25519PrivateKey.from_private_bytes(priv).exchange(X25519PublicKey.from_public_bytes(eph_pub))
+    return decrypt(_seal_key(shared, eph_pub, pub), blob[32:], "seal")

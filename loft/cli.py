@@ -108,6 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=4400)
     s.add_argument("--data", default=None, help="data dir (default ~/.loft-server)")
+    s.add_argument("--db", help="postgresql://user:pass@host/db (default: SQLite in the data dir)")
+    s.add_argument("--blobs", help="s3://bucket/prefix (default: files in the data dir; LOFT_S3_ENDPOINT for non-AWS)")
     s.add_argument("--tls-cert")
     s.add_argument("--tls-key")
     s.add_argument("--self-signed", metavar="HOSTS", help="comma-separated names/IPs for a generated cert")
@@ -226,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("id", type=int)
     cr.add_argument("--runner")
 
+    sub.add_parser("rotate-key", help="admin: new team key, re-encrypt everything, re-key remaining members")
     sub.add_parser("apikey", help="show the local automation API key (desktop app /v1)")
     sub.add_parser("fetch-browser", help="download the Camoufox browser (~1.3 GB)")
     return ap
@@ -251,7 +254,7 @@ def main(argv=None) -> None:
     if args.cmd == "server":
         from .server import create_app
         data = Path(args.data or "~/.loft-server").expanduser()
-        _serve(create_app(data), args.host, args.port, args.tls_cert, args.tls_key, args.self_signed, args.insecure, data)
+        _serve(create_app(data, db_url=args.db, blobs_url=args.blobs), args.host, args.port, args.tls_cert, args.tls_key, args.self_signed, args.insecure, data)
         return
     if args.cmd == "app":
         from .desktop import serve
@@ -335,7 +338,7 @@ def main(argv=None) -> None:
         print("ok")
     elif args.cmd == "kick":
         c.remove_member(tid, _uid(c, tid, args.email))
-        print("ok. They still know the team key: rotate it if that matters (not built yet).")
+        print("ok. They still hold the current team key: run `loft rotate-key` to lock them out.")
     elif args.cmd == "audit":
         for a in c.audit(tid, args.n):
             ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(a["at"]))
@@ -447,6 +450,12 @@ def main(argv=None) -> None:
         elif args.action == "rm":
             c.delete_runner(int(args.args[0]))
             print("ok")
+    elif args.cmd == "rotate-key":
+        from .client import rotate_team_key
+        out = rotate_team_key(c, tid)
+        print(f"re-keyed {len(out['rekeyed'])} members; {out['invites_revoked']} unused invites revoked")
+        if out["without_key"]:
+            print(f"no key for users {out['without_key']} (no keypair yet): they must be re-invited")
     elif args.cmd == "cloud":
         from .runner import start_cloud_session
         out = start_cloud_session(c, args.id, _runner(c, tid, args.runner))

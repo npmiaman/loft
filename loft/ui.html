@@ -333,8 +333,10 @@ async function renderTeam() {
     return `<tr><td>${esc(m.name)} <span class="mute small">${esc(m.email)}</span></td>
     <td>${can ? `<select style="width:auto" onchange="act(()=>api('POST','/members/${m.id}/role',{role:this.value}))">
       ${["member","admin"].concat(owner ? ["owner"] : []).map(r => `<option ${r===m.role?"selected":""}>${r}</option>`).join("")}</select>` : esc(m.role)}</td>
-    <td style="text-align:right">${can ? `<button class="b d" onclick="if(confirm('Remove ${esc(m.email)}?'))act(()=>api('DELETE','/members/${m.id}'))">Remove</button>` : ""}</td></tr>`; }).join("")}
+    <td style="text-align:right">${can ? `<button class="b d" onclick="removeMember(${m.id}, '${esc(m.email)}')">Remove</button>` : ""}</td></tr>`; }).join("")}
   </table></div>
+  ${admin ? `<div class="row" style="margin-top:8px"><button class="b" onclick="rotateKey()">Rotate team key</button>
+    <span class="mute small">New key; everything re-encrypted. People you removed can't open anything afterwards.</span></div>` : ""}
 
   <div class="section"><h3>Templates</h3><p class="mute small">Starting settings for new profiles. Stored encrypted.</p>
   <div class="card"><table><tr><th>Name</th><th>Settings</th><th></th></tr>
@@ -355,6 +357,18 @@ async function renderTeam() {
     <label style="margin-top:0">Join another team</label><div class="row"><input id="jc" placeholder="invite code"><button class="b" onclick="act(()=>api('POST','/join',{code:$('#jc').value}))">Join</button></div>
     <label>Create another team</label><div class="row"><input id="tn"><button class="b" onclick="act(()=>api('POST','/teams',{name:$('#tn').value}))">Create</button></div>
     <div class="err" id="err"></div></div>`;
+}
+async function removeMember(id, email) {
+  if (!confirm(`Remove ${email}?`)) return;
+  await act(() => api("DELETE", `/members/${id}`));
+  if (confirm(`${email} still holds the current team key. Rotate it now so they can't open anything? (Needs every profile stopped.)`)) rotateKey(true);
+}
+async function rotateKey(skipAsk) {
+  if (!skipAsk && !confirm("Rotate the team key? Every profile must be stopped. Large teams take a while.")) return;
+  try { const r = await api("POST", "/rotate-key");
+    alert(`Key rotated. ${r.rekeyed.length} members re-keyed, ${r.invites_revoked} unused invites revoked.` + (r.without_key.length ? ` ${r.without_key.length} member(s) need a new invite.` : ""));
+    await load(); }
+  catch (e) { alert(e.message); }
 }
 function tplDlg() {
   dlg(`<h3>New template</h3><label>Name</label><input id="t_name">
