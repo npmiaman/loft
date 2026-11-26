@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-latest
             extras: --extra desktop --extra build
             artifact: Loft-macos-arm64
           - os: windows-latest

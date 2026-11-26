@@ -71,6 +71,47 @@ class LocalProfile:
         self.meta_path.write_text(json.dumps({"version": v}))
 
 
+EXIT_IP_URLS = ("https://api64.ipify.org", "https://ifconfig.co/ip", "https://icanhazip.com")
+
+
+def proxy_url_of(proxy: dict) -> str:
+    from urllib.parse import quote
+    scheme, rest = proxy["server"].split("://", 1)
+    if proxy.get("username"):
+        return f"{scheme}://{quote(proxy['username'], safe='')}:{quote(proxy.get('password', ''), safe='')}@{rest}"
+    return proxy["server"]
+
+
+def check_proxy(proxy: dict, timeout: float = 15, samples: int = 3) -> dict:
+    """Exit IP as *sites* see it, plus latency. Uses dual-stack endpoints: a proxy that reaches dual-stack
+    sites over IPv6 must report its IPv6 exit, or WebRTC (set from this IP) won't match the page IP."""
+    import time
+    import httpx
+    errors = []
+    for url in EXIT_IP_URLS:
+        t0 = time.time()
+        try:
+            r = httpx.get(url, proxy=proxy_url_of(proxy), timeout=timeout)
+            ip = r.text.strip()
+            if r.status_code == 200 and ip and len(ip) < 60:
+                ms = int((time.time() - t0) * 1000)
+                seen = {ip}
+                for _ in range(samples - 1):  # a proxy whose exit changes between connections can't be matched
+                    try:
+                        seen.add(httpx.get(url, proxy=proxy_url_of(proxy), timeout=timeout).text.strip())
+                    except Exception:
+                        pass
+                out = {"ok": True, "ip": ip, "ipv6": ":" in ip, "ms": ms, "stable": len(seen) == 1}
+                if len(seen) > 1:
+                    out["warning"] = (f"exit IP changes between connections ({', '.join(sorted(seen))}); sites will "
+                                      f"see different IPs. Fix the proxy (e.g. make it use only IPv4).")
+                return out
+            errors.append(f"{url}: HTTP {r.status_code}")
+        except Exception as e:
+            errors.append(f"{url}: {type(e).__name__}: {str(e)[:120]}")
+    return {"ok": False, "error": "; ".join(errors)}
+
+
 def host_os() -> str:
     import sys
     return {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
@@ -84,11 +125,14 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
         fingerprint=info["fingerprint"],
         headless=headless,
         # With a proxy, derive timezone/locale/geolocation from the proxy's exit IP so they match it.
-        geoip=bool(proxy),
+        geoip=bool(proxy),  # replaced by the measured exit IP in open_profile when the proxy check works
         # noise: canvas/WebGL readback is random, so profiles on one machine can't be linked by canvas.
         # real: this machine's true rendering (stable, stock-Firefox-like, but shared by every same-OS profile here).
         canvas_noise=info.get("canvas", "noise") != "real",
         i_know_what_im_doing=True,  # the fingerprint is pinned on purpose: that's what keeps a profile stable
+        # One IP per profile. On dual-stack networks (e.g. Airtel) pages arrive over IPv6 while WebRTC shows
+        # the IPv4 address, and checkers read two IPs as "hiding your real IP" (BrowserScan -10%, measured).
+        firefox_user_prefs={"network.dns.disableIPv6": True},
     )
     if not opts["canvas_noise"] and info.get("os") != host_os():
         raise LoftError(400, f"canvas 'real' needs a {host_os()} profile on this machine; this one is {info.get('os')}")
@@ -138,9 +182,18 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
         threading.Thread(target=beat, daemon=True).start()
 
         from camoufox.sync_api import Camoufox
+        opts = camoufox_options(info, local.data, headless)
+        if info.get("proxy"):
+            chk = check_proxy(info["proxy"])
+            if not chk["ok"]:
+                raise LoftError(502, f"proxy not working: {chk['error']}")
+            opts["geoip"] = chk["ip"]  # timezone/locale/geo + WebRTC IP from the exit IP pages will see
+            log(f"proxy exit {chk['ip']} ({chk['ms']} ms)")
+            if chk.get("warning"):
+                log("WARNING: " + chk["warning"])
         log(f"launching '{info['name']}'" + (f" via {info['proxy']['server']}" if info.get("proxy") else ""))
         err: Optional[BaseException] = None
-        with Camoufox(**camoufox_options(info, local.data, headless)) as context:
+        with Camoufox(**opts) as context:
             context.loft_info = info  # type: ignore[attr-defined]
             try:
                 yield context

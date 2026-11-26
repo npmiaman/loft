@@ -101,7 +101,10 @@ def test_parse_proxy_roundtrip():
 def test_tls_self_signed_and_bind_rule(tmp_path):
     from loft.tls import check_bind, fingerprint, self_signed
     cert, key = self_signed(tmp_path, ["loft.local", "10.0.0.5"])
-    assert cert.exists() and oct(key.stat().st_mode)[-3:] == "600" and len(fingerprint(cert)) == 64
+    import sys
+    assert cert.exists() and len(fingerprint(cert)) == 64
+    if sys.platform != "win32":  # no POSIX modes on Windows
+        assert oct(key.stat().st_mode)[-3:] == "600"
     assert self_signed(tmp_path, ["loft.local"]) == (cert, key)  # reused when hosts are covered
     with pytest.raises(SystemExit):
         check_bind("0.0.0.0", tls=False, insecure=False)
