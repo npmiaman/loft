@@ -476,6 +476,12 @@ def entry() -> None:
     except BadInput as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(2)
+    except ModuleNotFoundError as e:
+        if e.name and e.name.split(".")[0] in ("camoufox", "pywebview", "webview"):
+            print("error: this command needs the browser. Install it with:  pip install 'loft[client]'  "
+                  "(or 'loft[desktop]' for the app).", file=sys.stderr)
+            sys.exit(3)
+        raise
     except KeyboardInterrupt:
         sys.exit(130)
 

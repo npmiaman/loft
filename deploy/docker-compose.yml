@@ -1,0 +1,77 @@
+# Production stack: Loft server + Postgres + Caddy (automatic Let's Encrypt TLS).
+# Blob storage is external S3/R2/B2 by default (set LOFT_BLOBS + AWS_* in .env).
+# For a self-contained box, uncomment the `minio` service and the minio lines.
+#
+#   cp deploy/.env.example deploy/.env   # then edit it
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#
+# Caddy gets a real cert for ${LOFT_DOMAIN} automatically (ports 80/443 must be
+# reachable from the internet and DNS must point at this host).
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: loft
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: loft
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loft"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LOFT_DB: postgresql://loft:${POSTGRES_PASSWORD}@db:5432/loft
+      LOFT_BLOBS: ${LOFT_BLOBS:?set LOFT_BLOBS in .env, e.g. s3://my-bucket/loft}
+      LOFT_S3_ENDPOINT: ${LOFT_S3_ENDPOINT:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      LOFT_OPEN_SIGNUP: "0"
+    expose:
+      - "4400"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      LOFT_DOMAIN: ${LOFT_DOMAIN:?set LOFT_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile.compose:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # Self-hosted S3 instead of AWS/R2. Uncomment, set LOFT_BLOBS=s3://loft and
+  # LOFT_S3_ENDPOINT=http://minio:9000 in .env, and add `minio` under server.depends_on.
+  # minio:
+  #   image: minio/minio
+  #   restart: unless-stopped
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID}
+  #     MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY}
+  #   volumes:
+  #     - minio-data:/data
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+  # minio-data:
