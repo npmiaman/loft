@@ -46,7 +46,7 @@ def test_roles_and_visibility(mk):
     # share run-only: visible, proxy password hidden, cannot edit
     admin.share(p["id"], ids["mem@x.io"], "run")
     seen = member.profiles(tid)[0]
-    assert seen["access"] == "run" and seen["proxy"] == {"server": "http://1.2.3.4:8080"}
+    assert seen["access"] == "run" and seen["proxy"]["password"] == "secret"  # decrypted client-side
     with pytest.raises(LoftError) as e:
         member.patch_profile(p["id"], name="hijack")
     assert e.value.status == 403
@@ -176,3 +176,55 @@ def test_pack_skips_caches_and_unpack_guards_paths(tmp_path):
         z.writestr("../evil", "x")
     with pytest.raises(ValueError):
         unpack(buf.getvalue(), tmp_path / "evil-out")
+
+
+def test_server_only_sees_ciphertext(mk, tmp_path):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p = owner.create_profile(tid, name="x", fingerprint={"navigator": {"userAgent": "SECRET-UA"}},
+                             proxy={"server": "http://h:1", "username": "u", "password": "PROXYPW"})
+    raw = owner.j("GET", f"/profiles/{p['id']}/launch")
+    assert "PROXYPW" not in raw["proxy"] and "SECRET-UA" not in raw["fingerprint"]
+    lk = owner.lock(p["id"])["lock"]
+    owner.upload(p["id"], lk, 0, b"COOKIE-DATA")
+    blob = owner.req("GET", f"/profiles/{p['id']}/data").content
+    assert b"COOKIE-DATA" not in blob
+    assert owner.download(p["id"]) == (1, b"COOKIE-DATA")
+    # every file the server wrote is ciphertext too
+    for f in (tmp_path / "srv").rglob("*"):
+        if f.is_file():
+            b = f.read_bytes()
+            assert b"PROXYPW" not in b and b"SECRET-UA" not in b and b"COOKIE-DATA" not in b, f
+
+
+def test_new_device_recovers_team_key_with_password(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    p = owner.create_profile(tid, name="x", fingerprint=FP, proxy={"server": "http://h:1"})
+    fresh = mk()
+    fresh.login("mem@x.io", "password1")
+    owner.share(p["id"], ids["mem@x.io"])
+    assert fresh.launch_info(p["id"])["fingerprint"] == FP
+
+
+def test_invite_without_key_part_cannot_decrypt(mk):
+    owner = mk()
+    owner.register("o@x.io", "password1")
+    tid = owner.create_team("T")["id"]
+    owner.create_profile(tid, name="x", fingerprint=FP, proxy={"server": "http://h:1"})
+    code = owner.invite(tid)["code"].split(".")[0]  # server part only
+    m = mk()
+    m.register("m@x.io", "password1", invite=code)
+    with pytest.raises(LoftError) as e:
+        m.team_key(tid)
+    assert e.value.status == 403
+
+
+def test_templates_and_runners_are_encrypted(mk):
+    tid, owner, admin, member, ids = team_of_three(mk)
+    owner.add_template(tid, "US desktop", {"os": "windows", "proxy": "http://u:TPW@h:1"})
+    assert member.templates(tid)[0]["settings"]["proxy"] == "http://u:TPW@h:1"
+    assert "TPW" not in str(owner.j("GET", f"/teams/{tid}/templates"))
+    with pytest.raises(LoftError):
+        member.add_template(tid, "nope", {})
+    owner.add_runner(tid, "eu-1", "https://runner.example:4420", "RUNNERKEY")
+    assert member.runners(tid)[0]["secret"] == "RUNNERKEY"
+    assert "RUNNERKEY" not in str(owner.j("GET", f"/teams/{tid}/runners"))

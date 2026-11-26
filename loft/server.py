@@ -5,6 +5,7 @@ Both sit behind tiny helpers (_db, BlobStore) so Postgres/S3 can replace them.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -24,7 +25,13 @@ LOCK_TTL = 120  # seconds; clients heartbeat every ~30s
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL,
-  name TEXT NOT NULL, pw_hash TEXT NOT NULL, created REAL NOT NULL);
+  name TEXT NOT NULL, pw_hash TEXT NOT NULL, vault_salt TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS team_keys(team_id INTEGER, user_id INTEGER, wrapped TEXT NOT NULL,
+  PRIMARY KEY(team_id, user_id));
+CREATE TABLE IF NOT EXISTS templates(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, name TEXT NOT NULL,
+  payload TEXT NOT NULL, created_by INTEGER NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS runners(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, name TEXT NOT NULL,
+  url TEXT NOT NULL, secret TEXT NOT NULL, created_by INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS tokens(hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, name TEXT NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS members(team_id INTEGER, user_id INTEGER, role TEXT NOT NULL,
@@ -34,7 +41,7 @@ CREATE TABLE IF NOT EXISTS invites(code TEXT PRIMARY KEY, team_id INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles(id INTEGER PRIMARY KEY, team_id INTEGER NOT NULL, name TEXT NOT NULL,
   os TEXT NOT NULL, folder_id INTEGER, notes TEXT DEFAULT '', tags TEXT DEFAULT '[]',
-  proxy TEXT, start_url TEXT DEFAULT '', created_by INTEGER NOT NULL, created REAL NOT NULL,
+  proxy TEXT, start_url TEXT DEFAULT '', canvas TEXT NOT NULL DEFAULT 'noise', created_by INTEGER NOT NULL, created REAL NOT NULL,
   updated REAL NOT NULL, version INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS shares(profile_id INTEGER, user_id INTEGER, level TEXT NOT NULL,
   PRIMARY KEY(profile_id, user_id));
@@ -124,9 +131,10 @@ class ProfileIn(BaseModel):
     folder_id: Optional[int] = None
     notes: str = ""
     tags: list[str] = []
-    proxy: Optional[dict[str, Any]] = None  # {"server": "http://h:p", "username":..., "password":...}
+    proxy: Optional[str] = None  # client-encrypted JSON
     start_url: str = ""
-    fingerprint: dict[str, Any]
+    canvas: str = "noise"  # noise | real
+    fingerprint: str  # client-encrypted JSON
 
 
 class ProfilePatch(BaseModel):
@@ -134,14 +142,30 @@ class ProfilePatch(BaseModel):
     folder_id: Optional[int] = None
     notes: Optional[str] = None
     tags: Optional[list[str]] = None
-    proxy: Optional[dict[str, Any]] = None
+    proxy: Optional[str] = None  # client-encrypted JSON
     clear_proxy: bool = False
     start_url: Optional[str] = None
+    canvas: Optional[str] = None
 
 
 class ShareIn(BaseModel):
     user_id: int
     level: str = "run"
+
+
+class KeyIn(BaseModel):
+    wrapped: str
+
+
+class TemplateIn(BaseModel):
+    name: str
+    payload: str  # client-encrypted settings JSON
+
+
+class RunnerIn(BaseModel):
+    name: str
+    url: str
+    secret: str  # client-encrypted runner API key
 
 
 class LockIn(BaseModel):
@@ -231,12 +255,11 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
     def profile_out(con, p, level) -> dict:
         lock = con.execute("SELECT l.user_id,l.device,l.expires,u.name,u.email FROM locks l JOIN users u "
                            "ON u.id=l.user_id WHERE profile_id=? AND expires>?", (p["id"], time.time())).fetchone()
-        proxy = json.loads(p["proxy"]) if p["proxy"] else None
         return {
             "id": p["id"], "team_id": p["team_id"], "name": p["name"], "os": p["os"],
             "folder_id": p["folder_id"], "notes": p["notes"], "tags": json.loads(p["tags"]),
-            "proxy": proxy if level == "edit" else ({"server": proxy["server"]} if proxy else None),
-            "start_url": p["start_url"], "created_by": p["created_by"], "updated": p["updated"],
+            "proxy": p["proxy"],
+            "start_url": p["start_url"], "canvas": p["canvas"], "created_by": p["created_by"], "updated": p["updated"],
             "version": p["version"], "access": level,
             "running": ({"user_id": lock["user_id"], "by": lock["name"] or lock["email"],
                          "device": lock["device"]} if lock else None),
@@ -263,14 +286,16 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
                 raise HTTPException(403, "signup needs an invite")
             if con.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
                 raise HTTPException(409, "email already registered")
-            cur = con.execute("INSERT INTO users(email,name,pw_hash,created) VALUES(?,?,?,?)",
-                              (email, body.name or email.split("@")[0], _hash_pw(body.password), time.time()))
+            salt = base64.urlsafe_b64encode(secrets.token_bytes(16)).decode().rstrip("=")
+            cur = con.execute("INSERT INTO users(email,name,pw_hash,vault_salt,created) VALUES(?,?,?,?,?)",
+                              (email, body.name or email.split("@")[0], _hash_pw(body.password), salt, time.time()))
             uid = cur.lastrowid
             if inv:
                 con.execute("INSERT INTO members VALUES(?,?,?)", (inv["team_id"], uid, inv["role"]))
                 con.execute("UPDATE invites SET used_by=? WHERE code=?", (uid, inv["code"]))
                 audit(con, inv["team_id"], uid, "member.joined", detail=inv["role"])
-            return {"token": issue_token(con, uid), "user_id": uid}
+            return {"token": issue_token(con, uid), "user_id": uid, "vault_salt": salt,
+                    "team_id": inv["team_id"] if inv else None}
 
     @app.post("/auth/login")
     def login(body: Login):
@@ -278,7 +303,7 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             u = con.execute("SELECT * FROM users WHERE email=?", (body.email.strip().lower(),)).fetchone()
             if not u or not _check_pw(body.password, u["pw_hash"]):
                 raise HTTPException(401, "wrong email or password")
-            return {"token": issue_token(con, u["id"]), "user_id": u["id"]}
+            return {"token": issue_token(con, u["id"]), "user_id": u["id"], "vault_salt": u["vault_salt"]}
 
     @app.post("/auth/logout")
     def logout(authorization: str = Header(default="")):
@@ -416,15 +441,17 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
 
     @app.post("/teams/{tid}/profiles")
     def create_profile(tid: int, body: ProfileIn, user=Depends(current_user)):
+        if body.canvas not in ("noise", "real"):
+            raise HTTPException(400, "canvas must be noise or real")
         now = time.time()
         with _db() as con:
             need_role(con, tid, user)
             pid = con.execute(
-                "INSERT INTO profiles(team_id,name,os,folder_id,notes,tags,proxy,start_url,created_by,created,updated) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO profiles(team_id,name,os,folder_id,notes,tags,proxy,start_url,canvas,created_by,created,updated) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tid, body.name, body.os, body.folder_id, body.notes, json.dumps(body.tags),
-                 json.dumps(body.proxy) if body.proxy else None, body.start_url, user["id"], now, now)).lastrowid
-            blobs.put(f"fp-{pid}.json", json.dumps(body.fingerprint).encode())
+                 body.proxy, body.start_url, body.canvas, user["id"], now, now)).lastrowid
+            blobs.put(f"fp-{pid}.json", body.fingerprint.encode())
             audit(con, tid, user["id"], "profile.created", pid, body.name)
             return profile_out(con, con.execute("SELECT * FROM profiles WHERE id=?", (pid,)).fetchone(), "edit")
 
@@ -441,7 +468,7 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             p, lvl = profile_access(con, pid, user)
             out = profile_out(con, p, "edit")
         fp = blobs.get(f"fp-{pid}.json")
-        out["fingerprint"] = json.loads(fp) if fp else None
+        out["fingerprint"] = fp.decode() if fp else None
         out["access"] = lvl
         return out
 
@@ -451,7 +478,9 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             p, lvl = profile_access(con, pid, user)
             need_edit(lvl)
             sets, vals = [], []
-            for k in ("name", "folder_id", "notes", "start_url"):
+            if body.canvas is not None and body.canvas not in ("noise", "real"):
+                raise HTTPException(400, "canvas must be noise or real")
+            for k in ("name", "folder_id", "notes", "start_url", "canvas"):
                 v = getattr(body, k)
                 if v is not None:
                     sets.append(f"{k}=?"); vals.append(v)
@@ -460,7 +489,7 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             if body.clear_proxy:
                 sets.append("proxy=NULL")
             elif body.proxy is not None:
-                sets.append("proxy=?"); vals.append(json.dumps(body.proxy))
+                sets.append("proxy=?"); vals.append(body.proxy)
             sets.append("updated=?"); vals.append(time.time())
             con.execute(f"UPDATE profiles SET {','.join(sets)} WHERE id=?", (*vals, pid))
             audit(con, p["team_id"], user["id"], "profile.edited", pid,
@@ -587,6 +616,78 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
                                "JOIN users u ON u.id=v.created_by WHERE profile_id=? ORDER BY version DESC",
                                (pid,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------ team keys (wrapped per member)
+    @app.get("/teams/{tid}/keys/me")
+    def my_key(tid: int, user=Depends(current_user)):
+        with _db() as con:
+            need_role(con, tid, user)
+            r = con.execute("SELECT wrapped FROM team_keys WHERE team_id=? AND user_id=?", (tid, user["id"])).fetchone()
+        if not r:
+            raise HTTPException(404, "no key stored for you in this team")
+        return {"wrapped": r["wrapped"]}
+
+    @app.put("/teams/{tid}/keys/me")
+    def put_key(tid: int, body: KeyIn, user=Depends(current_user)):
+        with _db() as con:
+            need_role(con, tid, user)
+            con.execute("INSERT OR REPLACE INTO team_keys VALUES(?,?,?)", (tid, user["id"], body.wrapped))
+        return {"ok": True}
+
+    # ------------------------------------------------------------ templates
+    @app.get("/teams/{tid}/templates")
+    def templates(tid: int, user=Depends(current_user)):
+        with _db() as con:
+            need_role(con, tid, user)
+            return [dict(r) for r in con.execute("SELECT id,name,payload FROM templates WHERE team_id=? ORDER BY name",
+                                                 (tid,))]
+
+    @app.post("/teams/{tid}/templates")
+    def add_template(tid: int, body: TemplateIn, user=Depends(current_user)):
+        with _db() as con:
+            need_role(con, tid, user, "owner", "admin")
+            i = con.execute("INSERT INTO templates(team_id,name,payload,created_by,created) VALUES(?,?,?,?,?)",
+                            (tid, body.name, body.payload, user["id"], time.time())).lastrowid
+            audit(con, tid, user["id"], "template.created", detail=body.name)
+        return {"id": i, "name": body.name}
+
+    @app.delete("/templates/{xid}")
+    def del_template(xid: int, user=Depends(current_user)):
+        with _db() as con:
+            r = con.execute("SELECT * FROM templates WHERE id=?", (xid,)).fetchone()
+            if not r:
+                raise HTTPException(404, "template not found")
+            need_role(con, r["team_id"], user, "owner", "admin")
+            con.execute("DELETE FROM templates WHERE id=?", (xid,))
+            audit(con, r["team_id"], user["id"], "template.deleted", detail=r["name"])
+        return {"ok": True}
+
+    # ------------------------------------------------------------ cloud runners
+    @app.get("/teams/{tid}/runners")
+    def runners(tid: int, user=Depends(current_user)):
+        with _db() as con:
+            need_role(con, tid, user)
+            return [dict(r) for r in con.execute("SELECT id,name,url,secret FROM runners WHERE team_id=?", (tid,))]
+
+    @app.post("/teams/{tid}/runners")
+    def add_runner(tid: int, body: RunnerIn, user=Depends(current_user)):
+        with _db() as con:
+            need_role(con, tid, user, "owner", "admin")
+            i = con.execute("INSERT INTO runners(team_id,name,url,secret,created_by) VALUES(?,?,?,?,?)",
+                            (tid, body.name, body.url.rstrip("/"), body.secret, user["id"])).lastrowid
+            audit(con, tid, user["id"], "runner.added", detail=f"{body.name} {body.url}")
+        return {"id": i}
+
+    @app.delete("/runners/{rid}")
+    def del_runner(rid: int, user=Depends(current_user)):
+        with _db() as con:
+            r = con.execute("SELECT * FROM runners WHERE id=?", (rid,)).fetchone()
+            if not r:
+                raise HTTPException(404, "runner not found")
+            need_role(con, r["team_id"], user, "owner", "admin")
+            con.execute("DELETE FROM runners WHERE id=?", (rid,))
+            audit(con, r["team_id"], user["id"], "runner.removed", detail=r["name"])
+        return {"ok": True}
 
     @app.get("/health")
     def health():
