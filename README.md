@@ -118,7 +118,10 @@ Selenium and Puppeteer aren't supported. They drive Chromium through its debuggi
 ## Model and limits
 
 - **Roles.** Owners and admins see every profile. Members see only profiles they made or that are shared with them. Only owners and admins can invite, change roles, manage templates and runners, read the audit log, and force-unlock. A team always keeps at least one owner.
-- **Encryption scope.** Profile names, notes, tags, OS and the audit log are readable by the server; everything sensitive is ciphertext. Every team member holds the key, so `run` versus `edit` is enforced by the server, not by cryptography. Removing a member doesn't change the key; **key rotation isn't built yet**.
+- **Encryption scope.** Profile names, notes, tags, OS and the audit log are readable by the server; everything sensitive (fingerprints, proxies, browser data, templates, runner keys) is ciphertext. Every team member holds the key, so `run` versus `edit` is enforced by the server, not by cryptography.
+- **Key rotation.** Removing a member leaves them holding the old key, so `loft rotate-key` (or the Team tab) issues a new team key, re-encrypts everything, and seals the new key to each remaining member's X25519 public key — the removed person's key then opens nothing on the server. The CLI and UI show a preview first (who's re-keyed, who loses access, invites revoked). Data a member already downloaded stays theirs; no rotation can take that back.
+- **Backups.** `loft backup FILE` (admin) writes one passphrase-encrypted archive of every profile and template; `loft restore FILE` adds them to a team. For the server itself, `pg_dump` plus the S3 bucket — see [deploy/README.md](deploy/README.md).
+- **Admin dashboard.** The Overview tab (and `loft overview`) shows profiles, members, who's running what, storage, open invites, key epoch and last rotation, members missing keys, and recent activity.
 - **Fingerprint checkers, measured on a MacBook Air (2026-11-27).** These results are for a macOS profile on a Mac, through a residential proxy (Webshare, NL exit), going through `open_profile`:
 
   | Checker | Result |
@@ -154,20 +157,23 @@ uv run pytest -q          # 28 tests; the browser ones need Camoufox installed
 - A TLS server with a self-signed cert: plain HTTP refused, untrusted cert rejected, pinned CA works.
 - The `/v1` start and stop: it syncs.
 - Ctrl+C on `loft run`: it syncs.
-- The PyInstaller `Loft.app` (208 MB) driving a profile through its own API.
+- The PyInstaller `Loft.app` (208 MB) driving a profile through its own API; the Overview dashboard rendered against the live API.
+- **Real production path:** the `loft server` process on Postgres 17 + S3 (moto) + TLS, with register / team / profile / lock / sync / download / key-rotation, blobs stored as ciphertext in S3.
+- **Windows** (`.github/workflows/windows-smoke.yml`, GitHub `windows-latest`): client install, font enumeration, and the real headless-Camoufox browser suite — this is what caught the cp1252 font-read bug.
+- Desktop builds pass for macOS, Windows and Linux (`.github/workflows/desktop.yml`).
 
 **Not checked:**
-- The pywebview window, by eye.
-- The Windows and Linux builds. `.github/workflows/desktop.yml` builds all three, but it only runs manually or on a `v*` tag, because it uses Actions minutes.
-- A real VPS deployment.
-- Real proxies.
+- The pywebview window on Windows/Linux, by eye (checked on macOS).
+- A real cloud-host deployment (the config is verified locally, not on a live VPS).
+- Real AWS/R2 (S3 tested against moto); real proxies beyond ad-hoc manual runs.
 
 ## Layout
 
 ```
-loft/server.py    cloud server (FastAPI, SQLite + BlobStore; Postgres/S3 not built)
-loft/client.py    API client, config, team-key vault, client-side encryption
-loft/crypto.py    AES-GCM, scrypt
+loft/server.py    cloud server (FastAPI); SQLite+files or Postgres+S3 via storage.py
+loft/storage.py   DB (SQLite/Postgres) and blob (file/S3) backends
+loft/client.py    API client, config, team-key vault, client-side encryption, key rotation
+loft/crypto.py    AES-GCM, scrypt, X25519 sealed boxes (rotation)
 loft/engine.py    fingerprints, pack/unpack, open_profile/run_profile, cookies, bundles, bulk
 loft/runner.py    cloud runner; viewer.html is its streaming page
 loft/desktop.py   desktop app backend (UI API + /v1); ui.html is the UI
