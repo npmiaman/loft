@@ -71,6 +71,21 @@ loft import client-a.loftprofile --name "Client A copy"
 loft audit
 ```
 
+## Per-profile proxies (proxynet or any session proxy)
+
+A profile's proxy is any HTTP/SOCKS proxy. To give **each browser its own stable exit** from a pool, point the proxy at your gateway and put `{pid}` (the profile id) or `{session}` (→ `loft-<pid>`) in the username — Loft expands it at launch, so every profile gets its own sticky session while sharing one gateway config.
+
+This matches [proxynet](https://github.com/npmiaman/proxynet)'s username routing (`session-…` is sticky, `country-<cc>-session-…` pins a country, `node-<name>` a node):
+
+```bash
+# one template, reused for many profiles, each with its own sticky US exit:
+loft template add proxynet-us --proxy "http://country-us-session-{pid}:GATEWAY_PASS@gateway.example:8899"
+loft new "Store 1" --template proxynet-us
+loft new "Store 2" --template proxynet-us   # different sticky session, same gateway
+```
+
+Verified end to end locally (2026-11-27): a Loft profile fetched through a real proxynet gateway → node, its proxy username expanded to `country-us-session-<pid>`. Templates are encrypted and survive key rotation, so the gateway password never reaches the server in clear.
+
 ## Cloud runners
 
 ```bash

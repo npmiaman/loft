@@ -131,3 +131,18 @@ def test_dashboard_backup_restore_via_app(app):
     assert names == ["P"]
     # wrong passphrase is a clean 400
     assert t.post("/api/restore", json={"data": base64.b64encode(blob).decode(), "passphrase": "no"}).status_code == 400
+
+
+def test_proxy_placeholder_expansion():
+    from loft.engine import expand_proxy_placeholders
+    # per-profile sticky session for a proxynet gateway (or any session proxy)
+    p = {"server": "http://gw:8899", "username": "country-us-session-{pid}", "password": "x"}
+    expand_proxy_placeholders(p, 42)
+    assert p["username"] == "country-us-session-42" and p["server"] == "http://gw:8899"
+    p2 = {"server": "http://gw:8899", "username": "session-{session}", "password": "x"}
+    expand_proxy_placeholders(p2, 7)
+    assert p2["username"] == "session-loft-7"
+    assert expand_proxy_placeholders(None, 1) is None
+    # no placeholder = unchanged
+    p3 = {"server": "http://h:1", "username": "static", "password": "x"}
+    assert expand_proxy_placeholders(dict(p3), 9) == p3

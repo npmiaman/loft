@@ -201,6 +201,7 @@ function newDlg() {
     <div class="grid2"><div><label>OS fingerprint</label>${osSel("n_os",S.host_os,"n_canvas")}</div><div><label>Canvas</label>${canvasSel("n_canvas","real")}</div></div>
     <p class="mute small">Profiles with this machine's OS use real canvas and real fonts, which passes consistency checkers such as Pixelscan. Other OSes need canvas noise, and Pixelscan flags that.</p>
     <label>Proxy (optional): scheme://user:pass@host:port</label><input id="n_proxy" placeholder="http://user:pass@1.2.3.4:8080">
+    <div class="mute small">Tip: for a proxynet gateway (or any session proxy), put <code>{pid}</code> in the username to give this browser its own sticky exit, e.g. <code>http://country-us-session-{pid}:PASS@gateway:8899</code>. Save it as a template to reuse.</div>
     <label>Start URL</label><input id="n_url" placeholder="https://">
     <label>Tags (comma separated)</label><input id="n_tags">
     <label>Notes</label><input id="n_notes">

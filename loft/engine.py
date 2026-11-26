@@ -82,6 +82,29 @@ def proxy_url_of(proxy: dict) -> str:
     return proxy["server"]
 
 
+def expand_proxy_placeholders(proxy: Optional[dict], pid: int) -> Optional[dict]:
+    """Fill per-profile placeholders in a proxy's username/server, in place.
+
+    This is how a proxynet gateway (or any rotating/session proxy) gives each
+    Loft profile its own STABLE exit: set the profile's proxy to the gateway with
+    a username like  country-us-session-loft-{pid}  (or just  session-loft-{pid}),
+    and each profile resolves to its own sticky session while sharing one gateway
+    config. {pid} -> the profile id; {session} -> loft-<pid>.
+
+    proxynet routes by proxy username: 'session-<id>' is sticky (rendezvous-hashed
+    to a node), 'country-<cc>-session-<id>' pins a country, 'node-<name>' a node."""
+    if not proxy:
+        return proxy
+    subs = {"{pid}": str(pid), "{session}": f"loft-{pid}"}
+    for field in ("username", "server"):
+        v = proxy.get(field)
+        if isinstance(v, str):
+            for k, r in subs.items():
+                v = v.replace(k, r)
+            proxy[field] = v
+    return proxy
+
+
 def check_proxy(proxy: dict, timeout: float = 15, samples: int = 3) -> dict:
     """Exit IP as *sites* see it, plus latency. Uses dual-stack endpoints: a proxy that reaches dual-stack
     sites over IPv6 must report its IPv6 exit, or WebRTC (set from this IP) won't match the page IP."""
@@ -283,6 +306,7 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
     info = client.launch_info(pid)
     if not info.get("fingerprint"):
         raise LoftError(500, "profile has no fingerprint")
+    expand_proxy_placeholders(info.get("proxy"), pid)
     tid = info["team_id"]
     lk = client.lock(pid)
     lock_tok, server_v = lk["lock"], lk["version"]
