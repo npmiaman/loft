@@ -149,7 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("ls")
     n = sub.add_parser("new", help="create a profile with a fresh stable fingerprint")
     n.add_argument("name")
-    n.add_argument("--os", default=None, choices=["windows", "macos", "linux"])
+    n.add_argument("--os", default=None, choices=["windows", "macos", "linux"],
+                   help="default: this machine's OS, which can use real canvas + real fonts (passes Pixelscan)")
     n.add_argument("--proxy", help="scheme://user:pass@host:port")
     n.add_argument("--start-url", default=None)
     n.add_argument("--notes", default="")
@@ -160,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("count", type=int)
     b.add_argument("--name", default="Profile {n}", help="name pattern, {n} = number")
     b.add_argument("--start", type=int, default=1)
-    b.add_argument("--os", default="windows", choices=["windows", "macos", "linux"])
+    b.add_argument("--os", default=None, choices=["windows", "macos", "linux"])
     b.add_argument("--proxies", help="file with one proxy URL per line, assigned round-robin")
     b.add_argument("--tag", action="append", default=[])
     b.add_argument("--start-url", default="")
@@ -347,23 +348,26 @@ def main(argv=None) -> None:
     elif args.cmd == "ls":
         _print_profiles(c.profiles(tid))
     elif args.cmd == "new":
-        from .engine import new_fingerprint
+        from .engine import default_canvas, new_fingerprint
         base: dict = {}
         if args.template:
             match = [t for t in c.templates(tid) if t["name"] == args.template]
             if not match:
                 raise SystemExit(f"no template named {args.template}")
             base = match[0]["settings"]
-        os_name = args.os or base.get("os", "windows")
+        from .engine import host_os
+        os_name = args.os or base.get("os") or host_os()
         proxy = parse_proxy(args.proxy) if args.proxy else parse_proxy(base.get("proxy"))
         p = c.create_profile(tid, name=args.name, os=os_name, proxy=proxy,
                              start_url=args.start_url if args.start_url is not None else base.get("start_url", ""),
                              notes=args.notes, tags=args.tag if args.tag is not None else base.get("tags", []),
-                             canvas=args.canvas or base.get("canvas", "noise"), fingerprint=new_fingerprint(os_name))
+                             canvas=args.canvas or base.get("canvas") or default_canvas(os_name),
+                             fingerprint=new_fingerprint(os_name))
         print(f"created profile {p['id']}: {p['name']} ({p['os']}, canvas {p['canvas']})")
     elif args.cmd == "bulk":
         from .engine import bulk_create
-        ps = bulk_create(c, tid, args.count, name=args.name, os_name=args.os, proxies=read_proxies(args.proxies),
+        from .engine import host_os
+        ps = bulk_create(c, tid, args.count, name=args.name, os_name=args.os or host_os(), proxies=read_proxies(args.proxies),
                          start_n=args.start, tags=args.tag, start_url=args.start_url)
         print(f"created {len(ps)} profiles: {ps[0]['id']}..{ps[-1]['id']}")
     elif args.cmd == "edit":

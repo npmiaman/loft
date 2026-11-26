@@ -153,6 +153,73 @@ def host_os() -> str:
     return {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
 
 
+def host_font_families() -> set[str]:
+    """Font families installed on this machine (cached for a day)."""
+    import subprocess
+    import sys
+    import time
+    cache = HOME / "host-fonts.json"
+    try:
+        if cache.exists() and time.time() - cache.stat().st_mtime < 86400:
+            return set(json.loads(cache.read_text()))
+    except Exception:
+        pass
+    fams: set[str] = set()
+    try:
+        if sys.platform == "darwin":
+            try:
+                from AppKit import NSFontManager  # pyobjc, present with the desktop extra
+                fams = set(NSFontManager.sharedFontManager().availableFontFamilies())
+            except ImportError:
+                out = subprocess.run(["system_profiler", "SPFontsDataType", "-json"], capture_output=True,
+                                     text=True, timeout=120).stdout
+                for f in json.loads(out).get("SPFontsDataType", []):
+                    for face in f.get("typefaces", []):
+                        if face.get("family"):
+                            fams.add(face["family"])
+        elif sys.platform == "win32":
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts")
+            for i in range(winreg.QueryInfoKey(k)[1]):
+                name = winreg.EnumValue(k, i)[0].split(" (")[0]
+                fams.add(name.replace(" Bold", "").replace(" Italic", "").replace(" Regular", "").strip())
+        else:
+            out = subprocess.run(["fc-list", ":", "family"], capture_output=True, text=True, timeout=60).stdout
+            for line in out.splitlines():
+                fams.update(x.strip() for x in line.split(",") if x.strip())
+    except Exception:
+        return set()
+    if fams:
+        HOME.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(sorted(fams)))
+    return fams
+
+
+def native_fonts(os_name: str) -> Optional[list[str]]:
+    """For a profile whose OS is this machine's OS: the fonts this machine really has.
+
+    Camoufox claims only its 'essential' list for native identities, which hides system fonts
+    every real install shows (on this Mac: Herculanum, Kefa, SignPainter). Pixelscan's server
+    compares the measured list with the OS's core set and reports 'Masking detected'
+    (osFontsStatus=false) -- measured 2026-11-27; with the real list it reports no masking."""
+    from importlib.resources import files
+    key = {"macos": "mac", "windows": "win", "linux": "lin"}[os_name]
+    data = files("camoufox")
+    known = set(json.loads((data / "fonts.json").read_text())[key])
+    essential = set(json.loads((data / "essential-fonts.json").read_text())[key])
+    host = host_font_families()
+    if not host:
+        return None
+    return sorted((host & known) | essential)
+
+
+def default_canvas(os_name: str) -> str:
+    """real when the profile's OS is this machine's (needed to pass checkers like Pixelscan,
+    whose WebGL red-box test catches any canvas noise); noise otherwise (a foreign OS can't
+    show this machine's real rendering)."""
+    return "real" if os_name == host_os() else "noise"
+
+
 def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) -> dict:
     proxy = info.get("proxy")
     opts = dict(
@@ -172,6 +239,10 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
     )
     if not opts["canvas_noise"] and info.get("os") != host_os():
         raise LoftError(400, f"canvas 'real' needs a {host_os()} profile on this machine; this one is {info.get('os')}")
+    if info.get("os") == host_os():
+        fonts = native_fonts(info["os"])
+        if fonts:
+            opts["fonts"] = fonts  # replaces Camoufox's list (it is an allowlist, not an addition)
     if proxy:
         opts["proxy"] = {k: v for k, v in proxy.items() if k in ("server", "username", "password", "bypass") and v}
     return opts
@@ -450,6 +521,7 @@ def bulk_create(client: Client, tid: int, count: int, *, name: str = "Profile {n
     if count < 1 or count > 500:
         raise LoftError(400, "count must be 1-500")
     out = []
+    fields.setdefault("canvas", default_canvas(os_name))
     for i in range(count):
         proxy = proxies[i % len(proxies)] if proxies else None
         out.append(client.create_profile(tid, name=name.replace("{n}", str(start_n + i)), os=os_name,

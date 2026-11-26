@@ -112,11 +112,22 @@ Selenium and Puppeteer aren't supported. They drive Chromium through its debuggi
 
 - **Roles.** Owners and admins see every profile. Members see only profiles they made or that are shared with them. Only owners and admins can invite, change roles, manage templates and runners, read the audit log, and force-unlock. A team always keeps at least one owner.
 - **Encryption scope.** Profile names, notes, tags, OS and the audit log are readable by the server; everything sensitive is ciphertext. Every team member holds the key, so `run` versus `edit` is enforced by the server, not by cryptography. Removing a member doesn't change the key; **key rotation isn't built yet**.
-- **Canvas.** These results come from runs on this Mac:
-  - `noise` (the default) makes canvas and WebGL readback random on every read. It works for any claimed OS, and profiles can't be linked by canvas, but a site sees a privacy-hardened Firefox (like Tor Browser or LibreWolf).
-  - `real` uses this machine's actual rendering, which is stable within a session, and only works when the profile's OS matches the machine. On web pages it changed between launches; I haven't confirmed why.
-- **Engine.** Firefox only. There is no Chromium engine: no open-source fingerprint-patched Chromium with a license you can build a product on turned up, and GoLogin's Orbita is closed and its terms forbid reuse.
-- **Fingerprint quality hasn't been measured** against CreepJS, BrowserScan or Pixelscan yet. Don't assume it passes them.
+- **Fingerprint checkers, measured on a MacBook Air (2026-11-27).** These results are for a macOS profile on a Mac, through a residential proxy (Webshare, NL exit), going through `open_profile`:
+
+  | Checker | Result |
+  |---|---|
+  | Pixelscan | consistent, no proxy detected, no masking detected, no automated behaviour |
+  | BrowserScan | 100%, Proxy: No, language nl-NL, timezone Europe/Amsterdam, WebRTC shows the proxy IP |
+  | CreepJS | 0% headless, 0% like-headless, 0% stealth |
+
+  What it took:
+  - **Real installed fonts.** Camoufox hides system fonts for native identities, and Pixelscan's server reads that as masking (`osFontsStatus=false`).
+  - **Real canvas.** Pixelscan's WebGL red-box test catches any canvas noise.
+  - **IPv4 only.** One IP per profile.
+  - **Exit IP measured through the proxy** and fed into WebRTC, timezone and geolocation.
+  - **A per-profile locale from the exit country.** Camoufox drew a random weighted locale on every launch and gave `de-NL` for a Dutch IP.
+- **The limit that follows.** Real canvas and real fonts only work when the profile's OS is the machine's OS, so that is now the default. A Windows profile on a Mac needs canvas noise and the bundled fonts, and Pixelscan flags that as masking. Run Windows profiles on a Windows machine, or on a Windows cloud runner.
+- **IP reputation is outside the browser.** Whether a site calls an IP a proxy depends on IP databases and the provider (residential beats datacenter). Loft only makes sure the browser doesn't give the proxy away.
 - **Cookies.** Expiry dates more than 399 days out are clamped, because Firefox silently drops them.
 
 ## Tests

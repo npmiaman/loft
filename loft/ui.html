@@ -191,14 +191,15 @@ async function cloud(id, btn) {
 
 function dlg(html) { const d = $("#dlg"); d.innerHTML = html + `<div class="err" id="derr"></div>`; d.showModal(); }
 const close_ = () => $("#dlg").close();
-const osSel = (id, v) => `<select id="${id}">${["windows","macos","linux"].map(o => `<option ${o===v?"selected":""}>${o}</option>`).join("")}</select>`;
+const osSel = (id, v, canvasId) => `<select id="${id}" ${canvasId ? `onchange="$('#${canvasId}').value = this.value === S.host_os ? 'real' : 'noise'"` : ""}>${["windows","macos","linux"].map(o => `<option value="${o}" ${o===v?"selected":""}>${o}${o===S.host_os ? " (this machine: best)" : ""}</option>`).join("")}</select>`;
 const canvasSel = (id, v) => `<select id="${id}"><option value="noise" ${v!=="real"?"selected":""}>noise: random per read, works on any OS</option><option value="real" ${v==="real"?"selected":""}>real: this machine's rendering (same OS only)</option></select>`;
 
 function newDlg() {
   dlg(`<h3>New profile</h3>
     ${S.templates.length ? `<label>Template</label><select id="n_tpl" onchange="applyTpl(this.value)"><option value="">none</option>${S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>` : ""}
     <label>Name</label><input id="n_name">
-    <div class="grid2"><div><label>OS fingerprint</label>${osSel("n_os","windows")}</div><div><label>Canvas</label>${canvasSel("n_canvas","noise")}</div></div>
+    <div class="grid2"><div><label>OS fingerprint</label>${osSel("n_os",S.host_os,"n_canvas")}</div><div><label>Canvas</label>${canvasSel("n_canvas","real")}</div></div>
+    <p class="mute small">Profiles with this machine's OS use real canvas and real fonts, which passes consistency checkers such as Pixelscan. Other OSes need canvas noise, and Pixelscan flags that.</p>
     <label>Proxy (optional): scheme://user:pass@host:port</label><input id="n_proxy" placeholder="http://user:pass@1.2.3.4:8080">
     <label>Start URL</label><input id="n_url" placeholder="https://">
     <label>Tags (comma separated)</label><input id="n_tags">
@@ -223,7 +224,7 @@ async function createProfile() {
 function bulkDlg() {
   dlg(`<h3>Bulk create</h3>
     <div class="grid2"><div><label>How many</label><input id="b_n" type="number" value="10" min="1" max="500"></div><div><label>Name pattern ({n} = number)</label><input id="b_name" value="Profile {n}"></div></div>
-    <div class="grid2"><div><label>OS fingerprint</label>${osSel("b_os","windows")}</div><div><label>Canvas</label>${canvasSel("b_canvas","noise")}</div></div>
+    <div class="grid2"><div><label>OS fingerprint</label>${osSel("b_os",S.host_os,"b_canvas")}</div><div><label>Canvas</label>${canvasSel("b_canvas","real")}</div></div>
     <label>Proxies, one per line, assigned round-robin (optional)</label><textarea id="b_px" placeholder="http://user:pass@1.2.3.4:8080"></textarea>
     <label>Tags</label><input id="b_tags">
     <label>Start URL</label><input id="b_url">
@@ -372,7 +373,7 @@ async function rotateKey(skipAsk) {
 }
 function tplDlg() {
   dlg(`<h3>New template</h3><label>Name</label><input id="t_name">
-    <div class="grid2"><div><label>OS</label>${osSel("t_os","windows")}</div><div><label>Canvas</label>${canvasSel("t_canvas","noise")}</div></div>
+    <div class="grid2"><div><label>OS</label>${osSel("t_os",S.host_os,"t_canvas")}</div><div><label>Canvas</label>${canvasSel("t_canvas","real")}</div></div>
     <label>Proxy</label><input id="t_proxy" placeholder="http://user:pass@host:port"><label>Start URL</label><input id="t_url"><label>Tags</label><input id="t_tags">
     <div class="row" style="margin-top:12px"><button class="b p" onclick="act(async()=>{await api('POST','/templates',{name:$('#t_name').value,os:$('#t_os').value,canvas:$('#t_canvas').value,proxy:$('#t_proxy').value.trim(),start_url:$('#t_url').value.trim(),tags:tags($('#t_tags').value)});close_()})">Save</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }

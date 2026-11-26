@@ -108,22 +108,22 @@ class LoginIn(BaseModel):
 
 class NewProfile(BaseModel):
     name: str
-    os: str = "windows"
+    os: Optional[str] = None  # default: this machine's OS
     proxy: str = ""
     start_url: str = ""
     notes: str = ""
     tags: list[str] = []
-    canvas: str = "noise"
+    canvas: Optional[str] = None  # default: real on this machine's OS, else noise
 
 
 class BulkIn(BaseModel):
     count: int
     name: str = "Profile {n}"
-    os: str = "windows"
+    os: Optional[str] = None
     proxies: list[str] = []
     tags: list[str] = []
     start_url: str = ""
-    canvas: str = "noise"
+    canvas: Optional[str] = None
 
 
 class EditProfile(BaseModel):
@@ -188,16 +188,19 @@ def make_app() -> FastAPI:
         save_config(cfg)
 
     def new_profile(c: Client, tid: int, body: NewProfile) -> dict:
-        from .engine import new_fingerprint
-        return c.create_profile(tid, name=body.name, os=body.os, proxy=parse_proxy(body.proxy or None),
-                                start_url=body.start_url, notes=body.notes, tags=body.tags, canvas=body.canvas,
-                                fingerprint=new_fingerprint(body.os))
+        from .engine import default_canvas, host_os, new_fingerprint
+        os_name = body.os or host_os()
+        return c.create_profile(tid, name=body.name, os=os_name, proxy=parse_proxy(body.proxy or None),
+                                start_url=body.start_url, notes=body.notes, tags=body.tags,
+                                canvas=body.canvas or default_canvas(os_name), fingerprint=new_fingerprint(os_name))
 
     def bulk(c: Client, tid: int, body: BulkIn) -> list:
         from .engine import bulk_create
         proxies = [parse_proxy(p) for p in body.proxies if p.strip()] or None
-        return bulk_create(c, tid, body.count, name=body.name, os_name=body.os, proxies=proxies, tags=body.tags,
-                           start_url=body.start_url, canvas=body.canvas)
+        from .engine import default_canvas, host_os
+        os_name = body.os or host_os()
+        return bulk_create(c, tid, body.count, name=body.name, os_name=os_name, proxies=proxies, tags=body.tags,
+                           start_url=body.start_url, canvas=body.canvas or default_canvas(os_name))
 
     def patch(c: Client, pid: int, body: EditProfile) -> dict:
         f: dict[str, Any] = {k: v for k, v in dict(name=body.name, start_url=body.start_url, notes=body.notes,
@@ -222,7 +225,8 @@ def make_app() -> FastAPI:
     @app.get("/api/state")
     def state():
         cfg = load_config()
-        base = {"server": cfg.get("server"), "browser": browser_installed(), "jobs": jobs.state()}
+        from .engine import host_os
+        base = {"server": cfg.get("server"), "browser": browser_installed(), "jobs": jobs.state(), "host_os": host_os()}
         if not cfg.get("token"):
             return {**base, "signed_in": False}
         c = Client(persist=True)

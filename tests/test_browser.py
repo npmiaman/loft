@@ -182,3 +182,18 @@ def test_crashing_script_still_syncs(team, tmp_path, site):
             page.evaluate("() => localStorage.setItem('k', 'before-crash')")
             raise RuntimeError("script bug")
     assert owner.profile(p)["version"] == 1 and owner.profile(p)["running"] is None
+
+
+def test_native_profile_shows_host_fonts_camoufox_would_hide():
+    """Pixelscan flagged 'Masking detected' because Camoufox hid installed system fonts (osFontsStatus=false)."""
+    import json
+    from importlib.resources import files
+    from loft.engine import default_canvas, host_font_families, native_fonts
+    host = host_os()
+    key = {"macos": "mac", "windows": "win", "linux": "lin"}[host]
+    essential = set(json.loads((files("camoufox") / "essential-fonts.json").read_text())[key])
+    known = set(json.loads((files("camoufox") / "fonts.json").read_text())[key])
+    hidden = (host_font_families() & known) - essential
+    fonts = set(native_fonts(host) or [])
+    assert hidden and hidden <= fonts, "every installed system font must be claimed"
+    assert default_canvas(host) == "real" and default_canvas("windows" if host != "windows" else "macos") == "noise"
