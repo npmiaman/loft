@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -148,9 +149,46 @@ class CommitIn(BaseModel):
     grants: list[Grant] = []
     templates: list[Reenc] = []
     runners: list[Reenc] = []
+    pigeon_setup: Optional[str] = None  # the team's shared Pigeon setup, re-encrypted with the new key
 
 
 # ---------------------------------------------------------------- app
+PIGEON_KINDS = "^(dm|comment|post|lead|upvote|reply)$"
+LEAD_TTL = 7 * 86400  # a queued lead is only "taken" for a week
+
+
+class PigeonClaim(BaseModel):
+    kind: str = Field(pattern=PIGEON_KINDS)
+    target: str = Field(min_length=1, max_length=500)
+    target_user: str = Field(default="", max_length=60)  # whose content this is, to refuse our own accounts
+    profile_id: Optional[int] = None
+    subreddit: str = Field(default="", max_length=100)
+    title: str = Field(default="", max_length=500)
+    body: str = Field(default="", max_length=20000)  # sealed by the client with the team key
+    url: str = Field(default="", max_length=1000)
+    at: Optional[float] = None  # backfilling history: when it really happened (never in the future)
+
+
+class PigeonFinish(BaseModel):
+    status: str = Field(pattern="^(done|failed|blocked)$")
+    error: str = Field(default="", max_length=500)
+
+
+class PigeonSeen(BaseModel):
+    kind: str = Field(pattern=PIGEON_KINDS)
+    targets: list[str] = Field(max_length=500)
+
+
+class PigeonAccount(BaseModel):
+    username: str = Field(min_length=1, max_length=60)
+
+
+class PigeonConfigIn(BaseModel):
+    setup: Optional[str] = None  # the team's shared Pigeon setup, sealed by the client (the server can't read it)
+    limits: Optional[dict] = None  # plain numbers: the server enforces them
+    base_version: int = 0
+
+
 def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] = None,
                db_url: Optional[str] = None, blobs_url: Optional[str] = None) -> FastAPI:
     data = Path(data_dir or os.environ.get("LOFT_DATA", "~/.loft-server")).expanduser()
@@ -774,6 +812,9 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             run_ids = {r["id"] for r in con.execute("SELECT id FROM runners WHERE team_id=?", (tid,))}
             if {x.id for x in body.templates} != tpl_ids or {x.id for x in body.runners} != run_ids:
                 raise HTTPException(400, "every template and runner must be re-encrypted")
+            cfg = pcfg(con, tid)
+            if cfg["setup"] and not body.pigeon_setup:
+                raise HTTPException(400, "the team's shared Pigeon setup must be re-encrypted")
             mems = {r["user_id"]: r["pubkey"] for r in con.execute(
                 "SELECT u.id user_id, u.pubkey FROM members m JOIN users u ON u.id=m.user_id WHERE m.team_id=?", (tid,))}
             grants = {g.user_id: g.sealed for g in body.grants}
@@ -798,6 +839,8 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
                 con.execute("UPDATE templates SET payload=? WHERE id=?", (x.payload, x.id))
             for x in body.runners:
                 con.execute("UPDATE runners SET secret=? WHERE id=?", (x.payload, x.id))
+            if cfg["setup"]:
+                con.execute("UPDATE pigeon_config SET setup=? WHERE team_id=?", (body.pigeon_setup, tid))
             con.execute("DELETE FROM team_keys WHERE team_id=?", (tid,))
             con.execute("INSERT INTO team_keys(team_id,user_id,epoch,kind,wrapped) VALUES(?,?,?,?,?)",
                         (tid, user["id"], body.epoch, "vault", body.self_wrapped))
@@ -891,6 +934,225 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
             con.execute("DELETE FROM runners WHERE id=?", (rid,))
             audit(con, r["team_id"], user["id"], "runner.removed", detail=r["name"])
         return {"ok": True}
+
+    # ------------------------------------------------------------ pigeon: the team's shared memory
+    # Every Pigeon session on every account reports here, so nobody DMs the same person twice, comments in the same thread twice,
+    # targets one of our own accounts, or loses track of what the team has already said in a subreddit. Who/where/when stays
+    # readable (de-duplication, limits and counts need it); message text arrives sealed with the team key.
+    def pnorm(kind: str, target: str) -> str:
+        t = target.strip().lower()
+        if kind in ("dm", "lead", "reply"):
+            return t.removeprefix("/").removeprefix("u/").removeprefix("user/").strip("/")
+        if kind in ("comment", "upvote"):  # a thread or comment, however it was linked
+            return re.sub(r"^https?://[^/]+", "", t.split("?")[0].split("#")[0]).rstrip("/")
+        return " ".join(t.split())
+
+    def pev(con, row) -> dict:
+        d = dict(row)
+        pr = con.execute("SELECT name FROM profiles WHERE id=?", (d["profile_id"],)).fetchone() if d.get("profile_id") else None
+        u = con.execute("SELECT email FROM users WHERE id=?", (d["user_id"],)).fetchone() if d.get("user_id") else None
+        d["profile"] = pr["name"] if pr else None
+        d["by"] = u["email"] if u else None
+        return d
+
+    def pcfg(con, tid: int) -> dict:
+        r = con.execute("SELECT * FROM pigeon_config WHERE team_id=?", (tid,)).fetchone()
+        return {"version": r["version"], "setup": r["setup"], "limits": json.loads(r["limits"]), "updated": r["updated"]} if r \
+            else {"version": 0, "setup": "", "limits": {}, "updated": 0.0}
+
+    def pused(con, tid: int, kind: str, since: float, subreddit: str = "") -> int:
+        q, args = ("SELECT COUNT(*) n FROM pigeon_events WHERE team_id=? AND kind=? AND status IN ('claimed','done') AND at>?",
+                   [tid, kind, since])
+        if subreddit:
+            q += " AND subreddit=?"
+            args.append(subreddit)
+        return con.execute(q, args).fetchone()["n"]
+
+    def pcheck_limits(con, tid: int, body: PigeonClaim, sub: str) -> None:
+        """Team-wide caps (set by an admin), over a rolling 24 hours. 429 says which limit and how much is used."""
+        lim = pcfg(con, tid)["limits"]
+        since = time.time() - 86400
+        checks = {"dm": [("team", "team_dm_per_day", ""), ("subreddit", "subreddit_dm_per_day", sub)],
+                  "comment": [("team", "team_comment_per_day", "")],
+                  "post": [("team", "team_post_per_day", ""), ("subreddit", "subreddit_post_per_day", sub)]}.get(body.kind, [])
+        for scope, key, only_sub in checks:
+            cap = lim.get(key)
+            if cap and (scope == "team" or sub):
+                used = pused(con, tid, body.kind, since, only_sub)
+                if used >= cap:
+                    raise HTTPException(429, json.dumps({"limit": {"scope": scope, "kind": body.kind, "cap": cap, "used": used,
+                                                                   "subreddit": only_sub}}))
+
+    @app.post("/teams/{tid}/pigeon/claim")
+    def pigeon_claim(tid: int, body: PigeonClaim, user=Depends(current_user)):
+        """Atomically reserve a target before acting on it. 409 if the team already has it, or it is one of our own
+        accounts; 429 if a team-wide limit is reached."""
+        with db.tx() as con:
+            need_role(con, tid, user)
+            if body.profile_id is not None:
+                p, _ = profile_access(con, body.profile_id, user)
+                if p["team_id"] != tid:
+                    raise HTTPException(404, "profile not found")
+            key, now = pnorm(body.kind, body.target), time.time()
+            sub = body.subreddit.lower().removeprefix("r/")
+            tu = pnorm("dm", body.target_user or (body.target if body.kind in ("dm", "lead") else ""))
+            if tu:
+                own = con.execute("SELECT a.username, p.name profile FROM pigeon_accounts a LEFT JOIN profiles p ON p.id=a.profile_id "
+                                  "WHERE a.team_id=? AND a.username=?", (tid, tu)).fetchone()
+                if own:
+                    raise HTTPException(409, json.dumps({"own_account": dict(own)}))
+            if body.at is None:  # real-time claims count against the limits; backfilled history does not
+                pcheck_limits(con, tid, body, sub)
+            at = min(body.at, now) if body.at else now
+            # ON CONFLICT DO NOTHING (not catching an error): on Postgres a failed statement would abort the whole transaction
+            row = con.execute(
+                "INSERT INTO pigeon_events(team_id,kind,target,subreddit,title,body,url,profile_id,user_id,status,at,updated) "
+                "VALUES(?,?,?,?,?,?,?,?,?,'claimed',?,?) "
+                "ON CONFLICT (team_id,kind,target) WHERE status IN ('claimed','done','blocked') DO NOTHING RETURNING id",
+                (tid, body.kind, key, sub, body.title, body.body, body.url, body.profile_id, user["id"], at, now)).fetchone()
+            if row:
+                return {"claimed": True, "id": row["id"]}
+            ex = con.execute("SELECT * FROM pigeon_events WHERE team_id=? AND kind=? AND target=? "
+                             "AND status IN ('claimed','done','blocked') ORDER BY id DESC LIMIT 1", (tid, body.kind, key)).fetchone()
+            if body.kind == "lead" and ex["at"] < now - LEAD_TTL:  # a lead nobody acted on for a week is up for grabs
+                con.execute("UPDATE pigeon_events SET profile_id=?,user_id=?,subreddit=?,title=?,body=?,url=?,at=?,updated=?,status='claimed' WHERE id=?",
+                            (body.profile_id, user["id"], sub, body.title, body.body, body.url, at, now, ex["id"]))
+                return {"claimed": True, "id": ex["id"]}
+            raise HTTPException(409, json.dumps({"existing": pev(con, ex)}))
+
+    @app.post("/teams/{tid}/pigeon/events/{eid}")
+    def pigeon_finish(tid: int, eid: int, body: PigeonFinish, user=Depends(current_user)):
+        with db.tx() as con:
+            need_role(con, tid, user)
+            ev = con.execute("SELECT * FROM pigeon_events WHERE id=? AND team_id=?", (eid, tid)).fetchone()
+            if not ev:
+                raise HTTPException(404, "event not found")
+            # only the claimer, or an admin (to release a claim that got stuck), may settle it
+            if ev["user_id"] != user["id"]:
+                need_role(con, tid, user, "owner", "admin")
+            con.execute("UPDATE pigeon_events SET status=?,error=?,updated=? WHERE id=?", (body.status, body.error, time.time(), eid))
+        return {"ok": True}
+
+    @app.post("/teams/{tid}/pigeon/seen")
+    def pigeon_seen(tid: int, body: PigeonSeen, user=Depends(current_user)):
+        """Which of these targets has the team already acted on (or is acting on right now)?"""
+        with db.tx() as con:
+            need_role(con, tid, user)
+            out = {}
+            for t in body.targets:
+                q, args = ("SELECT * FROM pigeon_events WHERE team_id=? AND kind=? AND target=? "
+                           "AND status IN ('claimed','done','blocked')", [tid, body.kind, pnorm(body.kind, t)])
+                if body.kind == "lead":
+                    q += " AND at>?"
+                    args.append(time.time() - LEAD_TTL)
+                r = con.execute(q + " LIMIT 1", args).fetchone()
+                if r:
+                    out[t] = pev(con, r)
+        return {"seen": out}
+
+    @app.get("/teams/{tid}/pigeon/events")
+    def pigeon_events(tid: int, kind: str = "", subreddit: str = "", profile_id: int = 0, status: str = "",
+                      days: float = 0, limit: int = 100, user=Depends(current_user)):
+        q, args = "SELECT * FROM pigeon_events WHERE team_id=?", [tid]
+        for col, val in (("kind", kind), ("subreddit", subreddit.lower().removeprefix("r/")), ("status", status)):
+            if val:
+                q += f" AND {col}=?"
+                args.append(val)
+        if profile_id:
+            q += " AND profile_id=?"
+            args.append(profile_id)
+        if days:
+            q += " AND at>?"
+            args.append(time.time() - days * 86400)
+        with db.tx() as con:
+            need_role(con, tid, user)
+            rows = con.execute(q + " ORDER BY id DESC LIMIT ?", (*args, min(limit, 1000))).fetchall()
+            return [pev(con, r) for r in rows]
+
+    @app.get("/teams/{tid}/pigeon/summary")
+    def pigeon_summary(tid: int, days: float = 14, user=Depends(current_user)):
+        since = time.time() - days * 86400
+        live = "status IN ('claimed','done','blocked')"
+        n = lambda k: f"COUNT(CASE WHEN kind='{k}' THEN 1 END)"  # portable: SUM(boolean) isn't valid on Postgres
+        cols = f"{n('dm')} dms, {n('comment')} comments, {n('post')} posts, {n('reply')} replies, {n('upvote')} upvotes, MAX(at) last_at"
+        with db.tx() as con:
+            need_role(con, tid, user)
+            kinds = {r["kind"]: r["n"] for r in con.execute(
+                f"SELECT kind, COUNT(*) n FROM pigeon_events WHERE team_id=? AND at>? AND {live} GROUP BY kind", (tid, since))}
+            subs = [dict(r) for r in con.execute(
+                f"SELECT subreddit, {cols} FROM pigeon_events WHERE team_id=? AND at>? AND {live} AND subreddit!='' "
+                f"AND kind!='lead' GROUP BY subreddit ORDER BY MAX(at) DESC", (tid, since))]
+            profs = [dict(r) for r in con.execute(
+                f"SELECT e.profile_id, p.name profile, "
+                + ", ".join(f"COUNT(CASE WHEN e.kind='{k}' THEN 1 END) {c}" for k, c in
+                            (("dm", "dms"), ("comment", "comments"), ("post", "posts"), ("reply", "replies"), ("upvote", "upvotes")))
+                + f", MAX(e.at) last_at FROM pigeon_events e LEFT JOIN profiles p ON p.id=e.profile_id "
+                f"WHERE e.team_id=? AND e.at>? AND e.{live} AND e.kind!='lead' GROUP BY e.profile_id, p.name "
+                f"ORDER BY MAX(e.at) DESC", (tid, since))]
+            stuck = con.execute("SELECT COUNT(*) n FROM pigeon_events WHERE team_id=? AND status='claimed' AND at<?",
+                                (tid, time.time() - 3600)).fetchone()["n"]
+            lim = pcfg(con, tid)["limits"]
+            now24 = time.time() - 86400
+            today = {k: pused(con, tid, k, now24) for k in ("dm", "comment", "post")}
+        return {"days": days, "by_kind": kinds, "by_subreddit": subs, "by_profile": profs, "stuck_claims": stuck,
+                "limits": lim, "last_24h": today}
+
+    # ---- our own Reddit accounts, so none of them ever targets another
+    @app.put("/teams/{tid}/pigeon/accounts/{pid}")
+    def pigeon_set_account(tid: int, pid: int, body: PigeonAccount, user=Depends(current_user)):
+        name = pnorm("dm", body.username)
+        if not re.fullmatch(r"[a-z0-9_-]{3,40}", name):
+            raise HTTPException(400, "that doesn't look like a Reddit username")
+        with db.tx() as con:
+            need_role(con, tid, user)
+            p, _ = profile_access(con, pid, user)
+            if p["team_id"] != tid:
+                raise HTTPException(404, "profile not found")
+            clash = con.execute("SELECT profile_id FROM pigeon_accounts WHERE team_id=? AND username=? AND profile_id!=?",
+                                (tid, name, pid)).fetchone()
+            if clash:
+                raise HTTPException(409, f"u/{name} is already registered to another profile")
+            con.execute("INSERT INTO pigeon_accounts(team_id,profile_id,username,updated) VALUES(?,?,?,?) "
+                        "ON CONFLICT(profile_id) DO UPDATE SET username=excluded.username, updated=excluded.updated",
+                        (tid, pid, name, time.time()))
+        return {"ok": True, "username": name}
+
+    @app.get("/teams/{tid}/pigeon/accounts")
+    def pigeon_accounts(tid: int, user=Depends(current_user)):
+        with db.tx() as con:
+            need_role(con, tid, user)
+            rows = con.execute("SELECT a.profile_id, p.name profile, a.username FROM pigeon_accounts a "
+                               "LEFT JOIN profiles p ON p.id=a.profile_id WHERE a.team_id=? ORDER BY a.username", (tid,)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ---- one shared setup for the team (sealed) and the team-wide limits (plain, enforced here)
+    @app.get("/teams/{tid}/pigeon/config")
+    def pigeon_get_config(tid: int, user=Depends(current_user)):
+        with db.tx() as con:
+            need_role(con, tid, user)
+            return pcfg(con, tid)
+
+    @app.put("/teams/{tid}/pigeon/config")
+    def pigeon_put_config(tid: int, body: PigeonConfigIn, x_key_epoch: str = Header(default=""), user=Depends(current_user)):
+        """Owners and admins publish the team's shared setup and limits. Optimistic: base_version must be the current one."""
+        if body.setup is not None and len(body.setup) > 400_000:
+            raise HTTPException(413, "team setup is too large")
+        with db.tx() as con:
+            need_role(con, tid, user, "owner", "admin")
+            not_rotating(con, tid)
+            if body.setup is not None:
+                check_epoch(con, tid, x_key_epoch)  # ciphertext must be made with the team's current key
+            cur = pcfg(con, tid)
+            if body.base_version != cur["version"]:
+                raise HTTPException(409, f"someone published a newer setup (version {cur['version']}); pull it first")
+            setup = cur["setup"] if body.setup is None else body.setup
+            limits = cur["limits"] if body.limits is None else {k: v for k, v in body.limits.items() if isinstance(v, int) and v > 0}
+            con.execute("INSERT INTO pigeon_config(team_id,setup,limits,version,updated,updated_by) VALUES(?,?,?,?,?,?) "
+                        "ON CONFLICT(team_id) DO UPDATE SET setup=excluded.setup, limits=excluded.limits, version=excluded.version, "
+                        "updated=excluded.updated, updated_by=excluded.updated_by",
+                        (tid, setup, json.dumps(limits), cur["version"] + 1, time.time(), user["id"]))
+            audit(con, tid, user["id"], "pigeon.config", detail=f"version {cur['version'] + 1}")
+        return {"version": cur["version"] + 1}
 
     @app.get("/health")
     def health():

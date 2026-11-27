@@ -1,0 +1,18 @@
+<!doctype html><html><head><title>mock</title><style>
+body{font:15px sans-serif;margin:0} shreddit-post,shreddit-comment{display:block;border-bottom:1px solid #ddd;padding:12px;min-height:200px}
+a{color:blue} .sp{height:600px} button{padding:8px 12px;margin:4px}
+[contenteditable]{border:1px solid #888;min-height:40px;padding:6px;margin:6px 0}
+</style></head><body><header><a href="/">Home</a><button>Messages</button></header><shreddit-post permalink="/r/saas/comments/p1/t1/" post-title="How do I find my first 10 customers?" author="founder_amy"
+ subreddit-prefixed-name="r/saas" score="10" comment-count="1"><a href="/r/saas/comments/p1/t1/">How do I find my first 10 customers?</a>
+ <div slot="text-body">I have built a product and nobody knows it exists. Where do people find early users?</div></shreddit-post><faceplate-textarea-input placeholder="Join the conversation" id="trigger" style="display:block;border:1px solid #888;padding:10px;margin:10px">Join the conversation</faceplate-textarea-input>
+     <div id="composer" style="display:none"><div contenteditable="true" id="ed"></div><button id="submit">Comment</button></div><shreddit-comment permalink="/r/saas/comments/p1/t1/c1/" author="reader_one" depth="0" score="3"><div slot="comment">I had the same problem, tried cold DMs and communities.</div></shreddit-comment><shreddit-comment permalink="/r/saas/comments/p1/t1/c2/" author="reader_two" depth="1" score="3"><div slot="comment">Honestly look at where your buyers already complain about alternatives.</div></shreddit-comment><shreddit-comment permalink="/r/saas/comments/p1/t1/c3/" author="AutoModerator" depth="0" score="3"><div slot="comment">Please read the rules.</div></shreddit-comment>
+<script>
+window.__log={upvotes:0,comments:[],dms:[]};
+for (const el of document.querySelectorAll('shreddit-post,shreddit-comment')) {
+  const sr=el.attachShadow({mode:'open'});
+  sr.innerHTML='<button upvote aria-pressed="false">▲ Upvote</button><slot></slot>';
+  sr.querySelector('button').addEventListener('click',e=>{e.currentTarget.setAttribute('aria-pressed','true');window.__log.upvotes++;});
+}
+document.getElementById('trigger').addEventListener('click',()=>{document.getElementById('composer').style.display='block'});
+     document.getElementById('submit').addEventListener('click',()=>{const ed=document.getElementById('ed');window.__log.comments.push(ed.innerText.trim());ed.innerHTML='';});
+</script></body></html>

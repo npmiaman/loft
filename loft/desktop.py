@@ -26,6 +26,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .cli import BadInput, parse_proxy, proxy_url
+from . import control
 from .client import Client, LoftError, load_config, save_config
 
 UI = Path(__file__).with_name("ui.html")
@@ -226,7 +227,15 @@ def make_app() -> FastAPI:
     def state():
         cfg = load_config()
         from .engine import host_os
-        base = {"server": cfg.get("server"), "browser": browser_installed(), "jobs": jobs.state(), "host_os": host_os()}
+        live = jobs.state()
+        for k, v in live.items():  # a running profile has a control channel: show its Pigeon agent's status
+            v["pigeon"] = None
+            if k.startswith("run-") and v["alive"]:
+                try:
+                    v["pigeon"] = control.request(int(k[4:]), "GET", "/pigeon/status", timeout=1)
+                except LoftError:
+                    pass  # still starting up, or already closing
+        base = {"server": cfg.get("server"), "browser": browser_installed(), "jobs": live, "host_os": host_os()}
         if not cfg.get("token"):
             return {**base, "signed_in": False}
         c = Client(persist=True)
@@ -411,6 +420,49 @@ def make_app() -> FastAPI:
     def kick(uid: int):
         c = client()
         return c.remove_member(team(c), uid)
+
+    # ------------------------------------------------------------ Pigeon (see loft/pigeon)
+    def _session(pid: int, method: str, path: str, body: dict | None = None, timeout: float = 130) -> dict:
+        try:
+            return control.request(pid, method, path, body, timeout=timeout)
+        except LoftError as e:
+            raise HTTPException(e.status, e.detail)
+
+    # Everything Pigeon can do runs inside the profile's open browser session; these pass straight through to it.
+    @app.get("/api/profiles/{pid}/pigeon/status")
+    def pigeon_status(pid: int):
+        return _session(pid, "GET", "/pigeon/status", timeout=10)
+
+    @app.post("/api/profiles/{pid}/pigeon/op")
+    def pigeon_op(pid: int, body: dict):
+        return _session(pid, "POST", "/pigeon/op", {"op": body.get("op"), "args": body.get("args") or {}})
+
+    @app.post("/api/profiles/{pid}/pigeon/job")
+    def pigeon_job(pid: int, body: dict):
+        return _session(pid, "POST", "/pigeon/job", {"kind": body.get("kind"), "args": body.get("args") or {}})
+
+    @app.post("/api/profiles/{pid}/pigeon/stop")
+    def pigeon_stop(pid: int):
+        return _session(pid, "POST", "/pigeon/stop")
+
+    @app.post("/api/profiles/{pid}/pigeon")  # kept for the small attach/stop controls on the profile row
+    def pigeon(pid: int, body: dict):
+        if body.get("action") == "stop":
+            return _session(pid, "POST", "/pigeon/stop")
+        return _session(pid, "POST", "/pigeon/start", {"mode": body.get("mode", "find")})
+
+    @app.get("/api/pigeon/brain")
+    def pigeon_brain(days: float = 14, limit: int = 40):
+        """The team's shared memory: totals by kind, subreddit and account, plus the latest events."""
+        c = client()
+        tid = team(c)
+        cfg = c.pigeon_config(tid)
+        setup = cfg["setup"] or {}
+        return {"summary": c.pigeon_summary(tid, days), "events": c.pigeon_events(tid, days=days, limit=limit),
+                "accounts": c.pigeon_accounts(tid),
+                "team_setup": {"version": cfg["version"], "product": (setup.get("product") or {}).get("name"),
+                               "subreddits": len(setup.get("subreddits") or []), "limits": cfg["limits"],
+                               "unreadable": cfg["unreadable"]}}
 
     @app.get("/api/rotate-key/preview")
     def rotate_preview():

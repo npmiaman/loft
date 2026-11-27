@@ -171,6 +171,31 @@ def country_locale(cc: str, seed: str = "") -> list[str]:
     return out
 
 
+# English-language browsers abroad: the English variant a real user in that country would have (en-US unless the country has its own).
+ENGLISH_VARIANTS = {"US": "en-US", "GB": "en-GB", "AU": "en-AU", "CA": "en-CA", "IE": "en-IE", "NZ": "en-NZ", "IN": "en-IN",
+                    "ZA": "en-ZA", "SG": "en-SG", "PH": "en-PH", "PK": "en-PK", "NG": "en-NG", "KE": "en-KE", "MY": "en-MY"}
+
+
+def english_locale(cc: str) -> list[str]:
+    cc = (cc or "").upper()
+    return [ENGLISH_VARIANTS.get(cc, "en-US"), "en"]
+
+
+def browser_locale(cc: str, seed: str = "", language: Optional[str] = None) -> list[str]:
+    """The browser language list for a profile appearing from country `cc`. Time zone, geolocation and region always follow the
+    exit IP; the language follows `language`, which is English unless asked otherwise:
+      "en" (default)   English: en-US, or the country's own English variant (en-GB, en-IN, ...)
+      "country"        the country's native language, then English (e.g. it-IT, it, en-US, en)
+      "it-IT" (a tag)  that language, then English"""
+    language = (language or os.environ.get("LOFT_LANGUAGE") or "en").strip()
+    if language.lower() == "en":
+        return english_locale(cc)
+    if language.lower() == "country":
+        return country_locale(cc, seed)
+    base = language.split("-")[0].lower()
+    return [language, base] + ([] if base == "en" else ["en-US", "en"])
+
+
 def host_os() -> str:
     import sys
     return {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
@@ -262,6 +287,11 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
     )
     if not opts["canvas_noise"] and info.get("os") != host_os():
         raise LoftError(400, f"canvas 'real' needs a {host_os()} profile on this machine; this one is {info.get('os')}")
+    if not opts["canvas_noise"]:
+        # Camoufox's own canvas cover is off in this mode, but Firefox's baseline fingerprint protection still randomizes canvas
+        # readback on web pages (a fresh key per launch), so "real" wasn't stable: measured 3 distinct values over 3 launches of one
+        # profile. With it off, the machine's true canvas comes through, and it is the same every launch.
+        opts["firefox_user_prefs"]["privacy.baselineFingerprintingProtection"] = False
     if info.get("os") == host_os():
         fonts = native_fonts(info["os"])
         if fonts:
@@ -271,25 +301,143 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
     return opts
 
 
+# The voice a stock macOS picks as its default for a given language/region. Camoufox draws a voice list for the identity but marks
+# none of them as the default, and macOS then fills the gap with *this machine's* default voice (e.g. Rishi [en-IN] on an
+# Italian profile): a checker can read the mismatch. So Loft marks exactly one default itself, matching the profile's locale.
+MAC_DEFAULT_VOICES = {
+    "en-US": "Samantha", "en-GB": "Daniel", "en-AU": "Karen", "en-IN": "Rishi", "en-IE": "Moira", "en-ZA": "Tessa",
+    "it-IT": "Alice", "fr-FR": "Thomas", "fr-CA": "Amélie", "fr-BE": "Thomas", "fr-CH": "Thomas", "de-DE": "Anna", "de-AT": "Anna",
+    "de-CH": "Anna", "es-ES": "Mónica", "es-MX": "Paulina", "es-AR": "Diego", "es-CO": "Soledad", "es-CL": "Francisca",
+    "pt-BR": "Luciana", "pt-PT": "Joana", "nl-NL": "Xander", "nl-BE": "Ellen", "ja-JP": "Kyoko", "zh-CN": "Tingting",
+    "zh-TW": "Meijia", "zh-HK": "Sinji", "ko-KR": "Yuna", "ru-RU": "Milena", "pl-PL": "Zosia", "sv-SE": "Alva", "da-DK": "Sara",
+    "nb-NO": "Nora", "fi-FI": "Satu", "tr-TR": "Yelda", "cs-CZ": "Zuzana", "el-GR": "Melina", "he-IL": "Carmit", "hu-HU": "Mariska",
+    "id-ID": "Damayanti", "ro-RO": "Ioana", "sk-SK": "Laura", "th-TH": "Kanya", "uk-UA": "Lesya", "hi-IN": "Lekha", "ar-SA": "Maged",
+}
+
+
+BASE_VOICE_REGION = {"en": "en-US", "es": "es-ES", "fr": "fr-FR", "de": "de-DE", "pt": "pt-BR", "zh": "zh-CN", "nl": "nl-NL",
+                     "it": "it-IT", "ja": "ja-JP", "ko": "ko-KR", "ru": "ru-RU", "ar": "ar-SA"}
+
+
+def _fold(s: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)).casefold()
+
+
+def profile_voices(os_name: str, locale, seed: str = "") -> Optional[list[dict]]:
+    """The profile's speech voices, with exactly ONE marked as the default and that one matching the profile's locale (None if the
+    list can't be drawn: then Camoufox's own draw is left alone). Deterministic per profile and locale."""
+    import hashlib
+    primary = (locale[0] if isinstance(locale, (list, tuple)) and locale else locale) or "en-US"
+    try:
+        from camoufox.fingerprints import _generate_random_voice_subset  # Camoufox's own per-OS, per-locale catalogue
+        voices = _generate_random_voice_subset(os_name, primary, seed=int(hashlib.sha256(f"voices:{os_name}:{seed}".encode()).hexdigest()[:8], 16))
+    except Exception:
+        return None
+    if not voices:
+        return None
+    lang = primary.split("-")[0].lower()
+    exact = [v for v in voices if v["lang"].replace("_", "-").lower() == primary.lower()]
+    same = [v for v in voices if v["lang"].lower().startswith(lang)]
+    pick = None
+    if os_name == "macos":
+        # the region's own default if it has one (it-IT: Alice), else the language's usual one (en-NG -> en-US's Samantha)
+        for tag in (primary, BASE_VOICE_REGION.get(lang, "")):
+            want = MAC_DEFAULT_VOICES.get(tag)
+            pool = exact if tag == primary else same
+            pick = pick or (next((v for v in pool if want and _fold(v["name"]).split(" (")[0] == _fold(want)), None))
+    pick = pick or (exact or same or voices)[0]
+    return [dict(v, isDefault=v is pick) for v in voices]
+
+
 def prepare_launch(info: dict, user_data_dir: Path, headless: bool = False, seed: str = "",
-                   log: Callable[[str], None] = print) -> dict:
-    """Camoufox options for a profile, with a live proxy check: the measured exit IP drives
-    timezone, geolocation and WebRTC, and the browser language is the exit country's, stable per profile."""
+                   log: Callable[[str], None] = print, expect: Optional[dict] = None) -> dict:
+    """Camoufox options for a profile, with a live proxy check: the measured exit IP drives timezone, geolocation and WebRTC; the
+    language is English by default (see browser_locale), stable per profile; and the default speech voice follows that language.
+    `expect`, if given, is filled with what the launched browser should then show (see audit_identity)."""
     opts = camoufox_options(info, user_data_dir, headless)
+    expect = {} if expect is None else expect
+    cc = None
     if info.get("proxy"):
         chk = check_proxy(info["proxy"])
         if not chk["ok"]:
             raise LoftError(502, f"proxy not working: {chk['error']}")
         opts["geoip"] = chk["ip"]
+        expect["ip"] = chk["ip"]
         log(f"proxy exit {chk['ip']} ({chk['ms']} ms)")
         if chk.get("warning"):
             log("WARNING: " + chk["warning"])
         try:
             from camoufox.geolocation import get_geolocation
-            opts["locale"] = country_locale(get_geolocation(chk["ip"]).locale.region, seed=seed)
+            geo = get_geolocation(chk["ip"])
+            cc = geo.locale.region
+            expect.update(country=cc, timezone=geo.timezone)
+            opts["locale"] = browser_locale(cc, seed=seed, language=info.get("language"))
         except Exception as e:
-            log(f"locale lookup failed ({e}); using Camoufox's")
+            log(f"locale lookup failed ({e}); using English")
+            opts["locale"] = english_locale("")  # never leave it to Camoufox's random weighted draw
+    if not opts.get("locale"):
+        # No proxy (or no country): Camoufox would draw a random weighted locale on every launch, and it can even disagree with itself
+        # (navigator.language en-US next to an Intl locale of en-IN). Same policy as with a proxy, without a country: English by default.
+        opts["locale"] = browser_locale("", seed=seed, language=info.get("language"))
+    locale = opts["locale"]
+    expect["locale"] = list(locale) if isinstance(locale, (list, tuple)) else [locale]
+    # one default speech voice, matching the language (see MAC_DEFAULT_VOICES)
+    voices = profile_voices(info.get("os") or host_os(), locale, seed=seed)
+    if voices:
+        opts["config"] = {**opts.get("config", {}), "voices": voices}
     return opts
+
+
+# What the launched browser is checked against: every signal that depends on the identity's language and exit country.
+AUDIT_JS = """() => new Promise(res => {
+  const o = Intl.DateTimeFormat().resolvedOptions(), d = new Date(2026, 0, 15, 13, 5, 9), lang = navigator.language;
+  const done = v => res({
+    language: lang, languages: Array.from(navigator.languages), intl_locale: o.locale, timezone: o.timeZone,
+    number_follows_language: new Intl.NumberFormat().format(1234567.89) === new Intl.NumberFormat(lang).format(1234567.89),
+    date_follows_language: d.toLocaleString() === d.toLocaleString(lang),
+    voice_default: v.filter(x => x.default).map(x => ({name: x.name, lang: x.lang})),
+    voices_in_language: v.filter(x => x.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase())).length,
+  });
+  let v = speechSynthesis.getVoices(); if (v.length) return done(v);
+  speechSynthesis.onvoiceschanged = () => done(speechSynthesis.getVoices()); setTimeout(() => done(speechSynthesis.getVoices()), 4000); })"""
+
+
+def audit_identity(context, expect: dict) -> list[dict]:
+    """Read every language/country-dependent signal from the REAL launched browser and compare it with what the profile's language
+    and exit IP imply. Returns [{signal, ok, actual, expected}]. A mismatch is a tell a thorough checker can use, so it is reported."""
+    page = context.new_page()
+    try:
+        page.goto("about:blank")
+        got = page.evaluate(AUDIT_JS)
+    finally:
+        page.close()
+    loc = expect.get("locale") or []
+    primary = loc[0] if loc else None
+    rows = []
+
+    def add(signal, ok, actual, expected):
+        rows.append(dict(signal=signal, ok=bool(ok), actual=actual, expected=expected))
+    if primary:
+        add("browser language", got["language"] == primary, got["language"], primary)
+        add("language list (Accept-Language)", got["languages"][:len(loc)] == loc, got["languages"], loc)
+        add("Intl locale", got["intl_locale"] == primary, got["intl_locale"], primary)
+        dv = got["voice_default"]
+        base = primary.split("-")[0].lower()
+        add("default speech voice", len(dv) == 1 and dv[0]["lang"].replace("_", "-").lower().startswith(base),
+            [f"{v['name']} [{v['lang']}]" for v in dv] or "none", f"exactly one, in {base}")
+        add("voices in the language", got["voices_in_language"] >= 1, got["voices_in_language"], ">= 1")
+    if expect.get("timezone"):
+        add("time zone (from the exit IP)", got["timezone"] == expect["timezone"], got["timezone"], expect["timezone"])
+    add("number format follows the language", got["number_follows_language"], got["number_follows_language"], True)
+    add("date/time format follows the language", got["date_follows_language"], got["date_follows_language"], True)
+    return rows
+
+
+def format_audit(rows: list[dict]) -> str:
+    bad = [r for r in rows if not r["ok"]]
+    lines = [f"  {'✓' if r['ok'] else '✗'} {r['signal']}: {r['actual']}" + ("" if r["ok"] else f"   (expected {r['expected']})") for r in rows]
+    return ("identity is consistent" if not bad else f"IDENTITY MISMATCH ({len(bad)})") + "\n" + "\n".join(lines)
 
 
 # ---------------------------------------------------------------- launch + sync
@@ -334,17 +482,87 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
         threading.Thread(target=beat, daemon=True).start()
 
         from camoufox.sync_api import Camoufox
-        opts = prepare_launch(info, local.data, headless, seed=str(pid), log=log)
+        expect: dict = {}
+        opts = prepare_launch(info, local.data, headless, seed=str(pid), log=log, expect=expect)
         log(f"launching '{info['name']}'" + (f" via {info['proxy']['server']}" if info.get("proxy") else ""))
         err: Optional[BaseException] = None
         with Camoufox(**opts) as context:
             context.loft_info = info  # type: ignore[attr-defined]
+            try:  # check the real browser against what its language and exit IP imply; never let the check break a launch
+                context.loft_audit = audit_identity(context, expect)  # type: ignore[attr-defined]
+                bad = [r for r in context.loft_audit if not r["ok"]]
+                log("identity consistent with the exit IP and language" if not bad else
+                    "WARNING identity mismatch: " + "; ".join(f"{r['signal']} is {r['actual']}, expected {r['expected']}" for r in bad))
+            except Exception as e:
+                context.loft_audit = []  # type: ignore[attr-defined]
+                log(f"(identity audit skipped: {type(e).__name__}: {str(e)[:80]})")
             try:
                 yield context
             except BaseException as e:  # still sync what the session did, then re-raise
                 err = e
         stop.set()
 
+        blob = pack(local.data)
+        try:
+            up = client.upload(pid, lock_tok, server_v, blob, tid=tid)
+            local.set_version(up["version"])
+            log(f"synced v{up['version']} ({len(blob) // 1024} KB)")
+            if result is not None:
+                result.update(version=up["version"], bytes=len(blob))
+        except LoftError as e:
+            keep = local.root / f"unsynced-{server_v}.zip"
+            keep.write_bytes(blob)
+            log(f"upload failed ({e}); kept local copy at {keep}")
+            raise
+        if err is not None:
+            raise err
+    finally:
+        stop.set()
+        try:
+            client.unlock(pid, lock_tok)
+        except LoftError:
+            pass
+
+
+@contextmanager
+def open_data(client: Client, pid: int, *, home: Path = PROFILES, log: Callable[[str], None] = print,
+              result: Optional[dict] = None) -> Iterator[Path]:
+    """Lock -> pull if stale -> yield the profile's data directory (no browser) -> push -> unlock.
+
+    For tools that read or edit files inside a profile and want them synced (Pigeon keeps its state in one). Decryption and
+    re-encryption are the client's, exactly as for `open_profile`."""
+    info = client.launch_info(pid)
+    tid = info["team_id"]
+    lk = client.lock(pid)
+    lock_tok, server_v = lk["lock"], lk["version"]
+    local = LocalProfile(pid, home)
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(30):
+            try:
+                client.heartbeat(pid, lock_tok)
+            except Exception as e:
+                log(f"heartbeat failed: {e}")
+
+    try:
+        if local.version != server_v or not local.data.exists():
+            if server_v > 0:
+                log(f"pulling v{server_v}")
+                _, blob = client.download(pid, server_v, tid=tid)
+                unpack(blob, local.data)
+            else:
+                if local.data.exists():
+                    shutil.rmtree(local.data)
+                local.data.mkdir(parents=True)
+            local.set_version(server_v)
+        threading.Thread(target=beat, daemon=True).start()
+        err: Optional[BaseException] = None
+        try:
+            yield local.data
+        except BaseException as e:  # still sync what was done, then re-raise
+            err = e
+        stop.set()
         blob = pack(local.data)
         try:
             up = client.upload(pid, lock_tok, server_v, blob, tid=tid)
@@ -379,23 +597,15 @@ def run_profile(client: Client, pid: int, *, headless: bool = False,
     restore = _graceful_signals(stop)
     try:
         with open_profile(client, pid, headless=headless, home=home, log=log, result=result) as context:
+            should_stop = lambda: stop.is_set() or stop_file.exists()
+            context.loft_stop = should_stop  # type: ignore[attr-defined]  sessions can watch for Ctrl+C / `loft stop` too
             if session:
                 session(context)
             else:
-                closed = threading.Event()
-                context.on("close", lambda *_: closed.set())
-                page = context.pages[0] if context.pages else context.new_page()
-                if context.loft_info.get("start_url"):
-                    page.goto(context.loft_info["start_url"])
-                while not closed.is_set():
-                    if stop.is_set() or stop_file.exists():
-                        log("stop requested: closing and syncing")
-                        break
-                    try:  # short waits keep Playwright's loop turning so the close event arrives
-                        context.wait_for_event("close", timeout=500)
-                        break
-                    except Exception:
-                        pass
+                # keeps the window open, serves the session's control channel (so tools like Pigeon can attach), and ends on
+                # window close or a stop request
+                from .session import interactive
+                interactive(context, pid, context.loft_info, home=home, log=log, client=client, should_stop=should_stop)
     finally:
         restore()
         stop_file.unlink(missing_ok=True)

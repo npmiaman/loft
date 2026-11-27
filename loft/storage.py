@@ -41,6 +41,16 @@ CREATE TABLE IF NOT EXISTS runners(id {pk}, team_id {int} NOT NULL, name TEXT NO
 CREATE TABLE IF NOT EXISTS audit(id {pk}, team_id {int}, user_id {int}, profile_id {int}, action TEXT NOT NULL,
   detail TEXT DEFAULT '', at {real} NOT NULL);
 CREATE INDEX IF NOT EXISTS audit_team ON audit(team_id, id);
+CREATE TABLE IF NOT EXISTS pigeon_events(id {pk}, team_id {int} NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+  subreddit TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+  profile_id {int}, user_id {int}, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', at {real} NOT NULL, updated {real} NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS pigeon_live ON pigeon_events(team_id, kind, target) WHERE status IN ('claimed','done','blocked');
+CREATE INDEX IF NOT EXISTS pigeon_by_team ON pigeon_events(team_id, kind, subreddit, at);
+CREATE TABLE IF NOT EXISTS pigeon_accounts(team_id {int} NOT NULL, profile_id {int} PRIMARY KEY, username TEXT NOT NULL,
+  updated {real} NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS pigeon_acct_user ON pigeon_accounts(team_id, username);
+CREATE TABLE IF NOT EXISTS pigeon_config(team_id {int} PRIMARY KEY, setup TEXT NOT NULL DEFAULT '', limits TEXT NOT NULL DEFAULT '{{}}',
+  version {int} NOT NULL, updated {real} NOT NULL, updated_by {int});
 CREATE TABLE IF NOT EXISTS rotation_stage(team_id {int}, profile_id {int}, epoch {int} NOT NULL,
   fingerprint TEXT NOT NULL, proxy TEXT, has_data {int} NOT NULL, PRIMARY KEY(team_id, profile_id));
 """
