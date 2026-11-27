@@ -213,7 +213,7 @@ def create_runner(key: str) -> FastAPI:
     @app.get("/v/{sid}", response_class=HTMLResponse)
     def view(sid: str, t: str = ""):
         by_view(sid, t)
-        return VIEWER.read_text()
+        return VIEWER.read_text(encoding="utf-8")
 
     @app.websocket("/ws/{sid}")
     async def ws(sock: WebSocket, sid: str, t: str = ""):

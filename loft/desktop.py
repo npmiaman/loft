@@ -221,7 +221,7 @@ def make_app() -> FastAPI:
     # ------------------------------------------------------------ UI
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return UI.read_text()
+        return UI.read_text(encoding="utf-8")
 
     @app.get("/api/state")
     def state():

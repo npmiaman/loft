@@ -41,6 +41,8 @@ Installing from a wheel, pick the extra for the role:
 - `pip install 'loft[desktop]'` — the desktop app (client + native window)
 - `pip install 'loft[server]'` — the cloud server only (Postgres + S3 drivers, **no browser**)
 
+On Windows, follow [docs/WINDOWS.md](docs/WINDOWS.md): setup steps, a checklist, and what has not been tested there.
+
 To deploy the server for a team (Docker or systemd, with Postgres, S3 and TLS), see [deploy/README.md](deploy/README.md).
 
 On a real server:
