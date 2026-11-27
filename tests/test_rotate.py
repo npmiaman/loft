@@ -337,7 +337,7 @@ def test_run_all_warns_about_shared_exits_using_real_encrypted_profiles(mk, monk
 
 
 # ------------------------------------------------------------------ `loft pigeon accounts`: each account bound to ONE unique proxy, team-wide
-WEBSHARE = ["siawaiso-1:pw@p.webshare.io:80", "siawaiso-2:pw@p.webshare.io:80", "siawaiso-3:pw@p.webshare.io:80"]  # Webshare's scheme-less format
+WEBSHARE = ["siawaiso-1:hunter2pw@p.webshare.io:80", "siawaiso-2:hunter2pw@p.webshare.io:80", "siawaiso-3:hunter2pw@p.webshare.io:80"]  # Webshare's scheme-less format
 
 
 def _pool(monkeypatch, tmp_path, lines, exits=None, ok=True):
@@ -376,15 +376,15 @@ def test_accounts_add_binds_each_account_to_its_own_proxy_and_shares_it_with_the
     assert set(profs) == {"Reddit 1", "Reddit 2", "Reddit 3"}
     # exactly one proxy each, all different, bound for good, with the password only readable by team members (it is ciphertext on the server)
     assert [profs[f"Reddit {n}"]["proxy"]["username"] for n in (1, 2, 3)] == ["siawaiso-1", "siawaiso-2", "siawaiso-3"]
-    assert {p["proxy"]["server"] for p in profs.values()} == {"http://p.webshare.io:80"} and all(p["proxy"]["password"] == "pw" for p in profs.values())
+    assert {p["proxy"]["server"] for p in profs.values()} == {"http://p.webshare.io:80"} and all(p["proxy"]["password"] == "hunter2pw" for p in profs.values())
     assert all(p["tags"] == ["reddit"] and p["start_url"] == "https://www.reddit.com/" for p in profs.values())
     raw = owner.j("GET", f"/profiles/{profs['Reddit 1']['id']}")["proxy"]
-    assert "siawaiso" not in raw and "pw" not in raw  # the server never sees the credentials
+    assert "siawaiso" not in raw and "hunter2pw" not in raw  # the server never sees the credentials
     # a teammate with access sees the same bindings, with nothing to set up themselves
     assert [p["proxy"]["username"] for p in sorted(admin.profiles(tid), key=lambda p: p["id"])] == ["siawaiso-1", "siawaiso-2", "siawaiso-3"]
     # `ls` never prints the password; `check` reports three distinct exits
     ls = _acct(owner, tid, capsys, "ls")
-    assert "siawaiso-2" in ls and "pw" not in ls.replace("proxy", "") and "Reddit 3" in ls
+    assert "siawaiso-2" in ls and "hunter2pw" not in ls and "Reddit 3" in ls
     chk = _acct(owner, tid, capsys, "check")
     assert "3 account(s), 3 distinct exit IP(s)" in chk and "⚠" not in chk
 

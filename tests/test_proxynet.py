@@ -53,7 +53,7 @@ def test_each_pigeon_account_gets_its_own_sticky_session_from_one_gateway(mk, tm
     url, seen = gateway
     monkeypatch.setattr(engine, "check_proxy", lambda proxy, **kw: dict(ok=True, ip="203.0.113.9", ipv6=False, ms=1, stable=True))
     real_opts = engine.camoufox_options
-    monkeypatch.setattr(engine, "prepare_launch", lambda info, d, headless=False, seed="", log=print: dict(real_opts(info, d, headless), geoip=False))
+    monkeypatch.setattr(engine, "prepare_launch", lambda info, d, headless=False, seed="", log=print, expect=None: dict(real_opts(info, d, headless), geoip=False))
 
     owner = mk()
     owner.register("o@x.io", "password1", "Owner")

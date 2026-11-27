@@ -50,8 +50,8 @@ def test_panel_renders_every_tab_and_sends_the_right_calls():
             body = json.loads(req.post_data) if req.post_data else None
             if path == "/state":
                 out = dict(signed_in=True, server="s", me=dict(email="a@x.io", teams=[dict(id=1, name="T", role="owner")]), device="d", team=1,
-                           role="owner", members=[], profiles=[dict(id=5, name="acct-a", os="windows", proxy=None, tags=[], notes="", version=1, access="edit", running=None)],
-                           running={"5": dict(alive=True, log=[], pigeon=STATUS)})
+                           role="owner", members=[], profiles=[dict(id=5, name="acct-a", os="windows", proxy=None, tags=[], notes="", version=1, access="edit", running=None, running_here=True)],
+                           jobs={"run-5": dict(alive=True, log=[], pigeon=STATUS)}, host_os="macos", browser=True, templates=[], runners=[], has_key=True)
             elif path == "/profiles/5/pigeon/status":
                 out = STATUS
             elif path == "/profiles/5/pigeon/op":
