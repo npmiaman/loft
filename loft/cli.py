@@ -45,7 +45,7 @@ def proxy_url(p: dict | None) -> str:
 def read_proxies(path: str | None) -> list[dict] | None:
     if not path:
         return None
-    lines = [l.strip() for l in Path(path).read_text().splitlines() if l.strip() and not l.startswith("#")]
+    lines = [l.strip() for l in Path(path).read_text(encoding="utf-8-sig").splitlines() if l.strip() and not l.startswith("#")]
     return [parse_proxy(l) for l in lines] or None
 
 
@@ -422,7 +422,7 @@ def main(argv=None) -> None:
         if args.action == "import":
             if not args.file:
                 raise SystemExit("cookies import ID FILE")
-            out = import_cookies(c, args.id, parse_cookies(Path(args.file).read_text()))
+            out = import_cookies(c, args.id, parse_cookies(Path(args.file).read_text(encoding="utf-8-sig")))
             print(f"imported {out['cookies']} cookies (synced v{out['version']})")
         else:
             data = json.dumps(export_cookies(c, args.id), indent=2)

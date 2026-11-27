@@ -254,7 +254,7 @@ def handle(args, c, get_tid=None) -> None:
     elif cmd == "leads":
         if args.export:
             csv_text = run_state(c, pid, "leads_export")["csv"]
-            (sys.stdout.write(csv_text) if args.export == "-" else open(args.export, "w").write(csv_text))
+            (sys.stdout.write(csv_text) if args.export == "-" else open(args.export, "w", encoding="utf-8", newline="").write(csv_text))
             if args.export != "-":
                 print(f"wrote {args.export}")
         else:
@@ -274,7 +274,7 @@ def handle(args, c, get_tid=None) -> None:
     elif cmd == "replied":
         _show(run_state(c, pid, "lead_replied", dict(username=args.username)))
     elif cmd == "import":
-        text = sys.stdin.read() if args.file == "-" else open(args.file).read()
+        text = sys.stdin.read() if args.file == "-" else open(args.file, encoding="utf-8").read()
         _show(run_state(c, pid, "leads_import", dict(text=text)))
     elif cmd == "clear":
         if not args.yes:

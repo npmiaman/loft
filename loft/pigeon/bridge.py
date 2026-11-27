@@ -22,8 +22,8 @@ class Bridge:
         self.pace = min(2.0, max(0.5, pace))
         self.stop_flag = False
         self.on_tick = None  # called on every check()/poll, on the thread that owns the browser
-        self._shim = (ASSETS / "shim.js").read_text()
-        self._script = (ASSETS / "reddit.js").read_text()
+        self._shim = (ASSETS / "shim.js").read_text(encoding="utf-8")
+        self._script = (ASSETS / "reddit.js").read_text(encoding="utf-8")
 
     def nap(self, seconds: float) -> None:
         """Sleep, while letting Playwright process browser events (URL changes, route callbacks, closes). Plain
@@ -40,7 +40,7 @@ class Bridge:
             directory.mkdir(parents=True, exist_ok=True)
             stem = f"{time.strftime('%Y%m%d-%H%M%S')}-{re.sub(r'[^a-z0-9]+', '-', label.lower()).strip('-')[:40]}"
             self.page.screenshot(path=str(directory / f"{stem}.png"), timeout=10_000)
-            (directory / f"{stem}.html").write_text(f"<!-- {self.page.url} -->\n" + self.page.content()[:400_000])
+            (directory / f"{stem}.html").write_text(f"<!-- {self.page.url} -->\n" + self.page.content()[:400_000], encoding="utf-8")
             old = sorted({f.stem for f in directory.iterdir() if f.suffix in (".png", ".html")})[:-keep]
             for f in directory.iterdir():
                 if f.stem in old:
