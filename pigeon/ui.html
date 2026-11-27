@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Loft</title>
+<title>Pigeon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --mute:#6b7280; --line:#e5e7eb; --acc:#2f6fed; --ok:#16a34a; --warn:#b45309; --bad:#dc2626; --soft:#eef3ff; }
@@ -60,7 +60,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 let S = null, tab = "profiles", filter = "";
 
 async function api(method, path, body, raw) {
-  const r = await fetch("/api" + path, { method, headers: { "X-Loft": "1", "Content-Type": "application/json" },
+  const r = await fetch("/api" + path, { method, headers: { "X-Pigeon": "1", "Content-Type": "application/json" },
                                          body: body ? JSON.stringify(body) : undefined });
   if (raw && r.ok) return r;
   const j = await r.json().catch(() => ({}));
@@ -76,7 +76,7 @@ function render() {
   const teams = S.me.teams;
   $("#app").innerHTML = `
   <header>
-    <b>Loft</b>
+    <b>Pigeon</b>
     <nav>${["profiles","team","activity"].concat(canAdmin() ? ["overview"] : []).map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${NAV[t]}</button>`).join("")}</nav>
     <span class="sp"></span>
     ${teams.length ? `<select style="width:auto" onchange="act(()=>api('POST','/team/'+this.value))">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
@@ -99,7 +99,7 @@ function render() {
 
 function renderLogin() {
   $("#app").innerHTML = `<div class="card login">
-    <h2 style="margin-top:0">Sign in to Loft</h2>
+    <h2 style="margin-top:0">Sign in to Pigeon</h2>
     <label>Server</label><input id="srv" value="${esc(S.server || "http://127.0.0.1:4400")}">
     <label>Email</label><input id="em" autocomplete="username">
     <label>Password</label><input id="pw" type="password" autocomplete="current-password">
@@ -140,16 +140,16 @@ async function act(fn, btn) {
 const NAV = { profiles: "Accounts", team: "Team", activity: "Activity", overview: "Overview" };
 const OPEN = new Set();   // <details> the person opened: the 3-second refresh redraws the page and must not close them
 const people = n => n === 1 ? "1 person" : n + " people", msgs = n => n === 1 ? "1 message" : n + " messages";
-const MODE = {};          // what each account's "Start Pigeon" will do, kept across redraws
+const MODE = {};          // what each account's "Start agent" will do, kept across redraws
 let HOW_SEEN = false;
 const det = (key, summary, body) => `<details ${OPEN.has(key) ? "open" : ""} ontoggle="this.open ? OPEN.add('${key}') : OPEN.delete('${key}')"><summary class="mute small" style="cursor:pointer">${summary}</summary>${body}</details>`;
 const MODE_WORDS = { find: "finding people", dm: "sending approved messages", full: "finding people and messaging them" };
 const JOB_WORDS = { scan: "adding the people on the page", replies: "checking for replies", doctor: "checking Reddit works", send: "sending a message",
                     post: "posting a comment", submit: "posting", setup: "reading your product", discover: "finding subreddits" };
 function pigeonWords(pg) {
-  if (pg.state === "stopping") return "Pigeon is stopping…";
-  if (pg.state === "idle") return "Pigeon is off";
-  return "Pigeon is " + ((pg.job === "run" ? MODE_WORDS[pg.mode] : JOB_WORDS[pg.job]) || "working");
+  if (pg.state === "stopping") return "Agent is stopping…";
+  if (pg.state === "idle") return "Agent is off";
+  return "Agent is " + ((pg.job === "run" ? MODE_WORDS[pg.mode] : JOB_WORDS[pg.job]) || "working");
 }
 function friendlyError(msg) {
   if (/proxy not working/i.test(msg)) return "This account's proxy isn't responding, so the browser was not opened (it would have used your own IP). Check the proxy in ⋯ → Edit.";
@@ -171,11 +171,11 @@ function actions(p, pg, busy) {
   let h = "";
   if (pg) {
     h += pg.state !== "idle"
-      ? `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'stop'}))">Stop Pigeon</button>`
-      : `<select id="pm${id}" style="width:auto" title="What should Pigeon do?" onchange="MODE[${id}]=this.value">
+      ? `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'stop'}))">Stop agent</button>`
+      : `<select id="pm${id}" style="width:auto" title="What should the agent do?" onchange="MODE[${id}]=this.value">
            ${[["find", "Find people (sends nothing)"], ["full", "Find people + message them"], ["dm", "Send approved messages"]].map(([v, t]) => `<option value="${v}" ${(MODE[id] || "find") === v ? "selected" : ""}>${t}</option>`).join("")}</select>
-         <button class="b p" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'start',mode:$('#pm${id}').value}))">Start Pigeon</button>`;
-    h += `<button class="b" onclick="pgOpen(${id})">Pigeon controls</button>`;
+         <button class="b p" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'start',mode:$('#pm${id}').value}))">Start agent</button>`;
+    h += `<button class="b" onclick="pgOpen(${id})">Agent controls</button>`;
   }
   return h + `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/stop'),this)" title="Closes the browser and saves its cookies to the team">Close &amp; save</button>`;
 }
@@ -194,8 +194,8 @@ function renderProfiles() {
   </div>
   <div class="card pad" style="margin-bottom:12px">${det("how", "<b>How does this work?</b>", `<ol class="small" style="margin:8px 0 0;padding-left:18px">
     <li><b>Open browser.</b> Each account has its own browser and its own proxy. The first time, sign in to Reddit in it.</li>
-    <li><b>Start Pigeon.</b> It finds people to talk to and writes the messages. Nothing is sent until you approve it, unless you turn that off.</li>
-    <li><b>Pigeon controls → People.</b> Read, edit and approve the messages. Then press Start again to send.</li>
+    <li><b>Start the agent.</b> It finds people to talk to and writes the messages. Nothing is sent until you approve it, unless you turn that off.</li>
+    <li><b>Agent controls → People.</b> Read, edit and approve the messages. Then press Start again to send.</li>
     <li><b>Close &amp; save.</b> Your login is saved (encrypted) so a teammate can open the same account later. Only one person can have an account open at a time.</li></ol>`)}</div>
   <div class="card"><table>
     <tr><th>Account</th><th>Status</th><th></th></tr>
@@ -342,7 +342,7 @@ function save(blob, name) { const a = document.createElement("a"); a.href = URL.
 
 function exportDlg(id) {
   dlg(`<h3>Export profile</h3>
-    <p class="mute small">A .loftprofile file holds the fingerprint, proxy, cookies and storage. Protect it with a passphrase.</p>
+    <p class="mute small">A .pigeonprofile file holds the fingerprint, proxy, cookies and storage. Protect it with a passphrase.</p>
     <label>Passphrase</label><input id="x_pw" type="password">
     <div class="row" style="margin-top:12px"><button class="b p" id="x_go" onclick="exportGo(${id})">Export</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }
@@ -351,12 +351,12 @@ async function exportGo(id) {
   if (!pw && !confirm("Export without a passphrase? Anyone with the file gets the logged-in sessions.")) return;
   try { const r = await api("POST", `/profiles/${id}/export`, { passphrase: pw }, true);
     const name = (r.headers.get("Content-Disposition") || "").match(/filename="(.+)"/);
-    save(await r.blob(), name ? name[1] : `profile-${id}.loftprofile`); close_(); }
+    save(await r.blob(), name ? name[1] : `profile-${id}.pigeonprofile`); close_(); }
   catch (e) { $("#derr").textContent = e.message; }
 }
 function importDlg() {
   dlg(`<h3>Import profile</h3>
-    <input type="file" id="i_file" accept=".loftprofile">
+    <input type="file" id="i_file" accept=".pigeonprofile,.loftprofile">
     <label>Passphrase (if it has one)</label><input id="i_pw" type="password">
     <label>Name (optional)</label><input id="i_name">
     <div class="row" style="margin-top:12px"><button class="b p" id="i_go" onclick="importGo()">Import</button><button class="b" onclick="close_()">Cancel</button></div>`);
@@ -395,14 +395,14 @@ async function renderTeam() {
       <td style="text-align:right">${admin ? `<button class="b d" onclick="act(()=>api('DELETE','/templates/${t.id}'))">Delete</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No templates.</td></tr>`}
   </table></div>${admin ? `<div class="row" style="margin-top:8px"><button class="b" onclick="tplDlg()">New template</button></div>` : ""}</div>
 
-  <div class="section"><h3>Cloud runners</h3><p class="mute small">Servers that run profiles for you, viewable from any browser or phone. Start one with <code>loft runner serve</code>.</p>
+  <div class="section"><h3>Cloud runners</h3><p class="mute small">Servers that run profiles for you, viewable from any browser or phone. Start one with <code>pigeon runner serve</code>.</p>
   <div class="card"><table><tr><th>Name</th><th>URL</th><th></th></tr>
     ${S.runners.map(r => `<tr><td>${esc(r.name)}</td><td class="small">${esc(r.url)}</td><td style="text-align:right">${admin ? `<button class="b d" onclick="act(()=>api('DELETE','/runners/${r.id}'))">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No runners.</td></tr>`}
   </table></div>${admin ? `<div class="row" style="margin-top:8px"><input id="r_name" placeholder="name" style="max-width:140px"><input id="r_url" placeholder="https://runner:4420"><input id="r_key" placeholder="runner key"><button class="b" onclick="act(()=>api('POST','/runners',{name:$('#r_name').value,url:$('#r_url').value,key:$('#r_key').value}))">Add</button></div>` : ""}</div>
 
   <div class="section"><h3>Automation API</h3>
   <div class="card pad small">Local API on this machine: <code>${esc(key.base)}</code><br>Key: <code>${esc(key.key)}</code>
-  <div class="mute" style="margin-top:6px">e.g. <code>curl -H "X-API-Key: ${esc(key.key)}" ${esc(key.base)}/profiles</code>. Full Playwright control is in the Python SDK: <code>loft exec ID script.py</code>.</div></div></div>
+  <div class="mute" style="margin-top:6px">e.g. <code>curl -H "X-API-Key: ${esc(key.key)}" ${esc(key.base)}/profiles</code>. Full Playwright control is in the Python SDK: <code>pigeon exec ID script.py</code>.</div></div></div>
 
   <div class="section card pad" style="max-width:480px">
     <label style="margin-top:0">Join another team</label><div class="row"><input id="jc" placeholder="invite code"><button class="b" onclick="act(()=>api('POST','/join',{code:$('#jc').value}))">Join</button></div>
@@ -429,13 +429,13 @@ async function rotateKey() {
 async function backupTeam() {
   const pw = prompt("Passphrase for the backup (needed to restore it):"); if (!pw) return;
   try { const r = await api("POST", "/backup", { passphrase: pw }, true);
-    save(await r.blob(), `loft-team-${S.team}.loftbackup`); }
+    save(await r.blob(), `pigeon-team-${S.team}.pigeonbackup`); }
   catch (e) { alert(e.message); }
 }
 function restoreDlg() {
   dlg(`<h3>Restore team backup</h3>
     <p class="mute small">Adds the backup's profiles and templates to <b>this</b> team. It never deletes existing profiles.</p>
-    <input type="file" id="rb_file" accept=".loftbackup">
+    <input type="file" id="rb_file" accept=".pigeonbackup,.loftbackup">
     <label>Passphrase</label><input id="rb_pw" type="password">
     <div class="row" style="margin-top:12px"><button class="b p" id="rb_go" onclick="restoreGo()">Restore</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }
@@ -513,8 +513,8 @@ function pgNext(busy) {   // the one thing to do next, in a sentence
   const n = k => (st.leads && st.leads[k]) || 0;
   let msg, go = null;
   if (st.state === "stopping") msg = "Stopping… the browser stays open.";
-  else if (busy) msg = "Pigeon is working in its own tab. You can keep using the browser. Nothing for you to do.";
-  else if (!st.product) { msg = "<b>Start here:</b> tell Pigeon what you're promoting, so it knows who to look for."; go = ["setup", "Go to Product"]; }
+  else if (busy) msg = "The agent is working in its own tab. You can keep using the browser. Nothing for you to do.";
+  else if (!st.product) { msg = "<b>Start here:</b> tell the agent what you're promoting, so it knows who to look for."; go = ["setup", "Go to Product"]; }
   else if (n("draft")) { msg = `<b>${n("draft")} message${n("draft") > 1 ? "s are" : " is"} waiting for you.</b> Read them and press Approve.`; go = ["leads", "Review messages"]; }
   else if (n("ready")) { msg = `<b>${n("ready")} approved message${n("ready") > 1 ? "s are" : " is"} ready.</b> Press Start (mode: send approved messages) to send them.`; go = ["run", "Go to Run"]; }
   else if (!st.stats.leads) { msg = "<b>Next:</b> press Start to find people to message."; go = ["run", "Go to Run"]; }
@@ -578,7 +578,7 @@ function pgBar() {
 
 function pgRender() {
   const busy = PG.st && PG.st.state !== "idle";
-  $("#pg").innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Pigeon · ${esc((S.profiles.find(p => p.id === PG.id) || {}).name || "account " + PG.id)}</h3><button class="b" onclick="$('#dlg').close()">Close</button></div>
+  $("#pg").innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Agent · ${esc((S.profiles.find(p => p.id === PG.id) || {}).name || "account " + PG.id)}</h3><button class="b" onclick="$('#dlg').close()">Close</button></div>
     <div id="pgbar" style="margin:8px 0"></div>
     ${pgNext(busy)}
     <div class="row" style="gap:4px;margin-bottom:10px;flex-wrap:wrap">${pgTabs.map(t => `<button class="b ${PG.tab === t ? "p" : ""}" onclick="pgTab('${t}')">${PG_LABEL[t]}</button>`).join("")}</div>
@@ -619,7 +619,7 @@ async function pgExport() {
 }
 
 function pgRun(busy) {
-  return `<div class="card" style="padding:12px"><b>Start Pigeon</b><div class="row" style="margin-top:8px">
+  return `<div class="card" style="padding:12px"><b>Start the agent</b><div class="row" style="margin-top:8px">
       <select id="pgmode"><option value="find">Find people (sends nothing)</option><option value="dm">Send approved messages</option><option value="full">Find people + message them</option></select>
       <input id="pgmin" type="number" placeholder="how many minutes (optional)" style="width:200px">
       <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('run',{mode:$('#pgmode').value,minutes:parseFloat($('#pgmin').value)||null}),'started')">▶ Start</button></div>
@@ -628,7 +628,7 @@ function pgRun(busy) {
       <label class="small"><input type="checkbox" id="pgns"> skip AI scoring</label>
       <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('scan',{no_score:$('#pgns').checked}),'scanning…')">Queue everyone on this page</button></div>
     <div class="card" style="padding:12px;margin-top:10px"><button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('replies'),'checking…')">Check replies</button></div>
-    <div class="card" style="padding:12px;margin-top:10px"><b>Check that Reddit works with Pigeon</b>
+    <div class="card" style="padding:12px;margin-top:10px"><b>Check that Reddit works with the agent</b>
       <div class="mute small">Safe: it only looks, it sends nothing. Run it once on a new account.</div>
       <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('doctor'),'checking Reddit… (the report appears here)')">Run the check</button>
       ${PG.st && PG.st.last && PG.st.last.kind === "doctor" && PG.st.last.out ? `<pre class="log">${esc(PG.st.last.out)}</pre>` : ""}</div>`;
@@ -681,7 +681,7 @@ function pgSettings() {
     `<label class="small">${esc(SETTING_LABELS[k] || k)}</label>${typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v)}">`}`).join("")}</div>
     <div class="row" style="margin-top:10px"><button class="b p" onclick="pgSaveSettings()">Save settings</button>
       <button class="b" onclick="pgGo(()=>pgOp('settings_set',{restart_warmup:true}),'warm-up restarted from today')">Restart warm-up from today</button></div>
-    <div class="mute small" style="margin-top:6px">The DeepSeek key stays on this machine: <code>loft pigeon config --deepseek-key KEY</code>.</div>`;
+    <div class="mute small" style="margin-top:6px">The DeepSeek key stays on this machine: <code>pigeon agent config --deepseek-key KEY</code>.</div>`;
 }
 function pgSaveSettings() {
   const pairs = {}; document.querySelectorAll("#pg [data-k]").forEach(el => { pairs[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value; });

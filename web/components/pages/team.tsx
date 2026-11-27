@@ -1,11 +1,11 @@
 "use client";
 import { ExternalLink } from "lucide-react";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import { Card, PageHead, Pill } from "../ui/bits";
 import { Rows } from "./overview";
 
 export function TeamPage() {
-  const { s } = useLoft();
+  const { s } = usePigeon();
   return (
     <>
       <PageHead title="Team" sub="People, roles and shared settings." />

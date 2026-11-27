@@ -1,4 +1,4 @@
-"""Pigeon inside Loft: logic tests, plus the real extension content script driven in real Camoufox
+"""Pigeon inside Pigeon: logic tests, plus the real extension content script driven in real Camoufox
 against Pigeon's mock of Reddit's DOM (tests/fixtures). No network, no real Reddit, fake DeepSeek.
 
 What this proves is the mechanics. It cannot prove Reddit's current markup matches the mock."""
@@ -12,12 +12,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from loft.pigeon import agent as agent_mod
-from loft.pigeon import brain, governor
-from loft.pigeon.agent import Agent
-from loft.pigeon.bridge import Bridge
-from loft.pigeon.llm import Llm, LlmError
-from loft.pigeon.state import State
+from pigeon.agent import agent as agent_mod
+from pigeon.agent import brain, governor
+from pigeon.agent.agent import Agent
+from pigeon.agent.bridge import Bridge
+from pigeon.agent.llm import Llm, LlmError
+from pigeon.agent.state import State
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -27,9 +27,9 @@ try:
     HAVE = True
 except Exception:
     HAVE = False
-# Escape hatch for machines without the 1.3 GB Camoufox download: LOFT_TEST_CHROMIUM=/path/to/chrome runs the same
+# Escape hatch for machines without the 1.3 GB Camoufox download: PIGEON_TEST_CHROMIUM=/path/to/chrome runs the same
 # mechanics tests in Playwright Chromium. It does NOT cover Camoufox-specific behaviour (isolated world, fingerprints).
-CHROMIUM = os.environ.get("LOFT_TEST_CHROMIUM")
+CHROMIUM = os.environ.get("PIGEON_TEST_CHROMIUM")
 needs_browser = pytest.mark.skipif(not (HAVE or CHROMIUM), reason="Camoufox browser not installed")
 
 
@@ -362,9 +362,9 @@ def test_daily_cap_blocks_sending(page, tmp_path, fast):
 
 
 # ------------------------------------------------------------------ state travels with the profile (no browser)
-def test_state_syncs_between_devices_through_loft(mk, tmp_path):
-    from loft.pigeon.runner import with_state
-    from loft.pigeon.state import STATE_NAME
+def test_state_syncs_between_devices_through_pigeon(mk, tmp_path):
+    from pigeon.agent.runner import with_state
+    from pigeon.agent.state import STATE_NAME
 
     owner = mk()
     owner.register("o@x.io", "password1", "Owner")
@@ -387,15 +387,15 @@ def test_state_syncs_between_devices_through_loft(mk, tmp_path):
     assert owner.profiles(tid)[0]["running"] is None  # lock released
 
 
-# ------------------------------------------------------------------ attaching Pigeon to a live Loft session
+# ------------------------------------------------------------------ attaching Pigeon to a live Pigeon session
 import threading  # noqa: E402
 
-from loft import control  # noqa: E402
-from loft.client import LoftError  # noqa: E402
-from loft.pigeon.attach import PigeonHost  # noqa: E402
-from loft.pigeon.bridge import Stop  # noqa: E402
-from loft.pigeon.runner import state_path  # noqa: E402
-from loft.session import interactive  # noqa: E402
+from pigeon import control  # noqa: E402
+from pigeon.client import PigeonError  # noqa: E402
+from pigeon.agent.attach import PigeonHost  # noqa: E402
+from pigeon.agent.bridge import Stop  # noqa: E402
+from pigeon.agent.runner import state_path  # noqa: E402
+from pigeon.session import interactive  # noqa: E402
 
 
 def seed_state(home, pid, **settings) -> State:
@@ -416,7 +416,7 @@ def host_for(home, pid, quit_when=None, llm=True, keep_state=False):
 
 
 def test_control_requires_token_and_a_live_session(tmp_path):
-    with pytest.raises(LoftError, match="not running on this machine"):
+    with pytest.raises(PigeonError, match="not running on this machine"):
         control.request(1, "GET", "/pigeon/status", home=tmp_path)
     ctl = control.SessionControl(1, tmp_path)
     ctl.route("GET", "/x", lambda b: (200, {"ok": True}))
@@ -424,7 +424,7 @@ def test_control_requires_token_and_a_live_session(tmp_path):
     try:
         assert control.request(1, "GET", "/x", home=tmp_path) == {"ok": True}
         info = json.loads(control.control_path(1, tmp_path).read_text())
-        bad = httpx.get(f"http://127.0.0.1:{info['port']}/x", headers={"X-Loft-Control": "nope"})
+        bad = httpx.get(f"http://127.0.0.1:{info['port']}/x", headers={"X-Pigeon-Control": "nope"})
         assert bad.status_code == 403
         assert httpx.get(f"http://127.0.0.1:{info['port']}/x").status_code == 403
     finally:
@@ -452,22 +452,22 @@ def test_host_http_surface(tmp_path):
     try:
         call = lambda m, p, b=None: control.request(1, m, p, b, home=tmp_path)
         op = lambda name, **args: call("POST", "/pigeon/op", {"op": name, "args": args})
-        with pytest.raises(LoftError, match="mode must be"):
+        with pytest.raises(PigeonError, match="mode must be"):
             call("POST", "/pigeon/start", {"mode": "nuke"})
-        with pytest.raises(LoftError, match="unknown job"):
+        with pytest.raises(PigeonError, match="unknown job"):
             call("POST", "/pigeon/job", {"kind": "format-disk"})
         host.st.product = None
-        with pytest.raises(LoftError, match="Set up the product"):
+        with pytest.raises(PigeonError, match="Set up the product"):
             call("POST", "/pigeon/start", {"mode": "find"})
         assert call("POST", "/pigeon/stop")["state"] == "idle"
         assert {l["username"] for l in op("leads_list", status="draft")["leads"]} == {"alice", "bob"}
         assert op("lead_approve", all=True)["approved"] == 1  # bob has no message to approve
         assert host.st.get_lead("alice")["status"] == "ready" and host.st.get_lead("bob")["status"] == "draft"
-        with pytest.raises(LoftError, match="no such lead"):
+        with pytest.raises(PigeonError, match="no such lead"):
             op("lead_approve", username="ghost")
-        with pytest.raises(LoftError, match="unknown operation"):
+        with pytest.raises(PigeonError, match="unknown operation"):
             op("rm_rf")
-        with pytest.raises(LoftError, match="unknown setting"):
+        with pytest.raises(PigeonError, match="unknown setting"):
             op("settings_set", pairs={"nope": 1})
         assert call("GET", "/pigeon/status")["state"] == "idle"
         assert State(state_path(1, tmp_path)).get_lead("alice")["status"] == "ready"  # every op is persisted by the session thread
@@ -483,7 +483,7 @@ def test_no_key_is_refused_up_front(tmp_path):
     host.mount(ctl)
     ctl.start()
     try:
-        with pytest.raises(LoftError, match="DeepSeek key"):
+        with pytest.raises(PigeonError, match="DeepSeek key"):
             control.request(1, "POST", "/pigeon/start", {"mode": "find"}, home=tmp_path)
     finally:
         ctl.close()
@@ -518,7 +518,7 @@ def test_attach_to_live_session_find_then_detach(mock_context, tmp_path, fast):
             call = lambda m, p, b=None: control.request(7, m, p, b, home=tmp_path, timeout=10)
             assert call("GET", "/pigeon/status")["state"] == "idle"
             call("POST", "/pigeon/start", {"mode": "find", "minutes": 0.4})
-            with pytest.raises(LoftError, match="already"):
+            with pytest.raises(PigeonError, match="already"):
                 call("POST", "/pigeon/start", {"mode": "find"})  # one agent per session
             time.sleep(0.5)
             seen["during"] = call("GET", "/pigeon/status")["state"]
@@ -620,10 +620,10 @@ def test_dm_is_never_retried_after_a_lost_page(page):
 
 
 def test_vendored_content_script_matches_the_extension_build():
-    """Loft runs a copy of the extension's built content script. When the extension repo is next door and has been built, the
-    copy must be identical (refresh it with `npm run sync:loft` in the extension repo)."""
+    """Pigeon runs a copy of the extension's built content script. When the extension repo is next door and has been built, the
+    copy must be identical (refresh it with `npm run sync:pigeon` in the extension repo)."""
     built = Path(__file__).parent.parent.parent / ".output" / "chrome-mv3" / "content-scripts" / "reddit.js"
     if not built.exists():
-        pytest.skip("extension build not found next to loft/")
-    vendored = Path(__file__).parent.parent / "loft" / "pigeon" / "assets" / "reddit.js"
-    assert vendored.read_bytes() == built.read_bytes(), "stale vendored script: run `npm run sync:loft` in the extension repo"
+        pytest.skip("extension build not found next to pigeon/")
+    vendored = Path(__file__).parent.parent / "pigeon" / "pigeon" / "assets" / "reddit.js"
+    assert vendored.read_bytes() == built.read_bytes(), "stale vendored script: run `npm run sync:pigeon` in the extension repo"

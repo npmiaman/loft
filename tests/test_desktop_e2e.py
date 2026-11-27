@@ -1,4 +1,4 @@
-"""The real desktop app, end to end: real backend, real Loft server, a profile it launches itself in a headless Camoufox
+"""The real desktop app, end to end: real backend, real Pigeon server, a profile it launches itself in a headless Camoufox
 subprocess, and the Pigeon panel driven in a browser. (test_ui_pigeon.py checks the front end against a stubbed API.)"""
 import json
 import os
@@ -10,10 +10,10 @@ import time
 import pytest
 import uvicorn
 
-import loft.client as lc
-import loft.control as control
-import loft.engine as le
-from loft.desktop import make_app
+import pigeon.client as lc
+import pigeon.control as control
+import pigeon.engine as le
+from pigeon.desktop import make_app
 from tests.test_pigeon import HAVE, browser  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not HAVE, reason="needs the real Camoufox browser (the desktop app launches profiles with it)")
@@ -34,8 +34,8 @@ def desktop(tmp_path, monkeypatch, server):
     monkeypatch.setattr(lc, "CONFIG", home / "config.json")
     monkeypatch.setattr(le, "PROFILES", home / "profiles")
     monkeypatch.setattr(control, "PROFILES", home / "profiles")
-    monkeypatch.setenv("LOFT_HOME", str(home))  # the profile subprocess the app starts finds the same config and profiles
-    monkeypatch.setenv("LOFT_HEADLESS", "1")
+    monkeypatch.setenv("PIGEON_HOME", str(home))  # the profile subprocess the app starts finds the same config and profiles
+    monkeypatch.setenv("PIGEON_HEADLESS", "1")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     port = _free_port()
     srv = uvicorn.Server(uvicorn.Config(make_app(), host="127.0.0.1", port=port, log_level="error"))
@@ -55,7 +55,7 @@ def desktop(tmp_path, monkeypatch, server):
 
 
 def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
-    url, loft_server, home = desktop
+    url, pigeon_server, home = desktop
     page = browser.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -63,7 +63,7 @@ def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
     page.goto(url + "/legacy/")  # the classic page; the new Next.js UI has its own test (test_web_e2e.py)
 
     # sign up, create a team, create a profile with the canvas choice, all through the UI
-    page.fill("#srv", loft_server)
+    page.fill("#srv", pigeon_server)
     page.fill("#em", "owner@x.io")
     page.fill("#pw", "password1")
     page.click("button:text-is('Create account')")
@@ -77,8 +77,8 @@ def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
     # the app launches the profile as its own subprocess; once that session's control channel is up, the panel appears
     page.click("button:text-is('Open browser')")
     page.wait_for_selector("text=Open on this computer", timeout=60000)
-    page.wait_for_selector("button:text-is('Pigeon controls')", timeout=120000)
-    page.click("button:text-is('Pigeon controls')")
+    page.wait_for_selector("button:text-is('Agent controls')", timeout=120000)
+    page.click("button:text-is('Agent controls')")
     page.wait_for_selector("#pg h3")
 
     def panel():

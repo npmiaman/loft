@@ -1,4 +1,4 @@
-"""Loft cloud server: accounts, teams, roles, encrypted profile sync, run locks, key rotation, audit.
+"""Pigeon cloud server: accounts, teams, roles, encrypted profile sync, run locks, key rotation, audit.
 
 Metadata: SQLite (default) or Postgres.  Blobs: a directory (default) or S3.
 The server never sees plaintext fingerprints, proxies, templates, runner keys or
@@ -19,6 +19,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from .compat import default_dir, env, server_db_file
 from .storage import Conflict, Database, open_blobs
 
 ROLES = ("owner", "admin", "member")
@@ -191,14 +192,14 @@ class PigeonConfigIn(BaseModel):
 
 def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] = None,
                db_url: Optional[str] = None, blobs_url: Optional[str] = None) -> FastAPI:
-    data = Path(data_dir or os.environ.get("LOFT_DATA", "~/.loft-server")).expanduser()
+    data = Path(data_dir or env("DATA") or default_dir(".pigeon-server", ".loft-server", ("loft.db", "pigeon.db", "blobs"))).expanduser()
     data.mkdir(parents=True, exist_ok=True)
-    db = Database(db_url or os.environ.get("LOFT_DB") or str(data / "loft.db"))
-    blobs = open_blobs(blobs_url or os.environ.get("LOFT_BLOBS") or data / "blobs")
+    db = Database(db_url or env("DB") or str(server_db_file(data)))
+    blobs = open_blobs(blobs_url or env("BLOBS") or data / "blobs")
     if open_signup is None:
-        open_signup = os.environ.get("LOFT_OPEN_SIGNUP", "0") == "1"
+        open_signup = env("OPEN_SIGNUP", "0") == "1"
 
-    app = FastAPI(title="Loft", version="0.2")
+    app = FastAPI(title="Pigeon", version="0.2")
     app.state.db, app.state.blobs = db, blobs
 
     def audit(con, team_id, user_id, action, profile_id=None, detail=""):
@@ -814,7 +815,7 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
                 raise HTTPException(400, "every template and runner must be re-encrypted")
             cfg = pcfg(con, tid)
             if cfg["setup"] and not body.pigeon_setup:
-                raise HTTPException(400, "the team's shared Pigeon setup must be re-encrypted")
+                raise HTTPException(400, "the team's shared agent setup must be re-encrypted")
             mems = {r["user_id"]: r["pubkey"] for r in con.execute(
                 "SELECT u.id user_id, u.pubkey FROM members m JOIN users u ON u.id=m.user_id WHERE m.team_id=?", (tid,))}
             grants = {g.user_id: g.sealed for g in body.grants}
@@ -1161,5 +1162,5 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
     return app
 
 
-def app_factory() -> FastAPI:  # for `uvicorn --factory loft.server:app_factory`
+def app_factory() -> FastAPI:  # for `uvicorn --factory pigeon.server:app_factory`
     return create_app()

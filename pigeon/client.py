@@ -1,4 +1,4 @@
-"""HTTP client for the Loft server, local config (~/.loft/config.json) and team-key vault.
+"""HTTP client for the Pigeon server, local config (~/.pigeon-app/config.json) and team-key vault.
 
 All secrets (fingerprints, proxies, template settings, browser data) are
 encrypted here before upload and decrypted after download.
@@ -13,13 +13,14 @@ from typing import Any, Optional
 
 import httpx
 
+from .compat import env, default_dir
 from . import crypto
 
-HOME = Path(os.environ.get("LOFT_HOME", "~/.loft")).expanduser()
+HOME = Path(env("HOME") or default_dir(".pigeon-app", ".loft", ("config.json", "profiles"))).expanduser()
 CONFIG = HOME / "config.json"
 
 
-class LoftError(Exception):
+class PigeonError(Exception):
     def __init__(self, status: int, detail: str):
         super().__init__(f"{status}: {detail}")
         self.status = status
@@ -44,7 +45,7 @@ class Client:
     def __init__(self, server: Optional[str] = None, token: Optional[str] = None,
                  transport: Optional[httpx.BaseTransport] = None, persist: bool = False,
                  ca: Optional[str] = None):
-        """persist=True: read/write token, vault key and team keys in ~/.loft/config.json."""
+        """persist=True: read/write token, vault key and team keys in ~/.pigeon-app/config.json."""
         cfg = load_config() if persist or server is None else {}
         self.persist = persist
         self.server = (server or cfg.get("server") or "http://127.0.0.1:4400").rstrip("/")
@@ -84,7 +85,7 @@ class Client:
                 detail = r.json().get("detail", r.text)
             except Exception:
                 detail = r.text
-            raise LoftError(r.status_code, str(detail))
+            raise PigeonError(r.status_code, str(detail))
         return r
 
     def j(self, method: str, path: str, body: Any = None, **kw) -> Any:
@@ -109,18 +110,18 @@ class Client:
     def _keypair(self) -> tuple[bytes, bytes]:
         me = self.j("GET", "/me")
         if not me.get("pubkey"):
-            raise LoftError(403, "no keypair on this account yet: sign in again")
+            raise PigeonError(403, "no keypair on this account yet: sign in again")
         priv = crypto.decrypt(self.vault, crypto.b64d(me["privkey"]), f"privkey:{me['id']}")
         return priv, crypto.b64d(me["pubkey"])
 
     def _fetch_key(self, tid: int) -> None:
         if not self.vault:
-            raise LoftError(401, "sign in again to unlock team keys")
+            raise PigeonError(401, "sign in again to unlock team keys")
         try:
             r = self.j("GET", f"/teams/{tid}/keys/me")
-        except LoftError as e:
+        except PigeonError as e:
             if e.status == 404:
-                raise LoftError(403, "you don't have this team's current key: join with the full invite code "
+                raise PigeonError(403, "you don't have this team's current key: join with the full invite code "
                                      "(code.key), or ask an admin to rotate the key")
             raise
         if r["kind"] == "sealed":  # granted by a key rotation: open with our private key, then keep a vault copy
@@ -155,7 +156,7 @@ class Client:
         """Run an encrypted write; if the team key rotated meanwhile, refresh it and redo the write."""
         try:
             return fn()
-        except LoftError as e:
+        except PigeonError as e:
             if e.status == 409 and "team key rotated" in e.detail:
                 self.refresh_key(tid)
                 return fn()
@@ -221,7 +222,7 @@ class Client:
     def accept(self, invite: str) -> dict:
         code, key = _split_invite(invite)
         if not key:
-            raise LoftError(400, "invite is missing its key part (expected code.key)")
+            raise PigeonError(400, "invite is missing its key part (expected code.key)")
         out = self.j("POST", f"/invites/{code}/accept")
         self._store_key(out["team_id"], key, self._invite_epoch(out["team_id"]))
         return out
@@ -344,7 +345,7 @@ class Client:
     def versions(self, pid: int) -> list:
         return self.j("GET", f"/profiles/{pid}/versions")
 
-    # ------------------------------------------------------------ pigeon: the team's shared memory (see loft/pigeon)
+    # ------------------------------------------------------------ pigeon: the team's shared memory (see pigeon/agent)
     SEALED = "enc1:"
 
     def seal_text(self, tid: int, text: str) -> str:
@@ -411,8 +412,8 @@ def rotate_team_key(c: "Client", tid: int, log=print) -> dict:
     old_epoch, old = c._key(tid)
     try:
         st = c.j("POST", f"/teams/{tid}/rotation/start")
-    except LoftError as e:
-        raise LoftError(e.status, f"can't start rotation: {e.detail}")
+    except PigeonError as e:
+        raise PigeonError(e.status, f"can't start rotation: {e.detail}")
     epoch, new = st["epoch"], crypto.new_key()
     try:
         for i, p in enumerate(st["profiles"], 1):

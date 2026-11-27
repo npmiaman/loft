@@ -25,7 +25,7 @@ class Llm:
     def chat(self, system: str, user: str, *, json_mode: bool = False, max_tokens: int = 4000,
              temperature: float | None = None) -> str:
         if not self.key:
-            raise LlmError("No DeepSeek key: `loft pigeon config --deepseek-key KEY` or set DEEPSEEK_API_KEY.")
+            raise LlmError("No DeepSeek key: `pigeon agent config --deepseek-key KEY` or set DEEPSEEK_API_KEY.")
         body = dict(model=self.model, stream=False, max_tokens=max_tokens, thinking={"type": "disabled"},
                     messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                     temperature=temperature if temperature is not None else (0.2 if json_mode else 0.8))

@@ -29,7 +29,7 @@ export function Login({ server, onDone }: { server?: string; onDone: () => Promi
           onSubmit={(e) => { e.preventDefault(); go(false); }} className="mx-auto w-full max-w-sm"
         >
           <div className="mb-8 flex items-center gap-2.5 text-[15px] font-semibold">
-            <span className="grid size-[26px] place-items-center rounded-lg bg-ink text-sm font-bold text-on-ink">L</span> Loft
+            <span className="grid size-[26px] place-items-center rounded-lg bg-ink text-sm font-bold text-on-ink">P</span> Pigeon
           </div>
           <h1 className="text-[26px] font-semibold tracking-[-0.025em]">Welcome back</h1>
           <p className="mb-6 mt-1 text-mute">Sign in to your team's browsers.</p>

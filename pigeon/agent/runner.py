@@ -1,4 +1,4 @@
-"""Glue between Loft's profile lifecycle (lock -> pull -> run -> push -> unlock) and Pigeon."""
+"""Glue between Pigeon's profile lifecycle (lock -> pull -> run -> push -> unlock) and Pigeon."""
 from __future__ import annotations
 
 import time
@@ -44,7 +44,7 @@ def with_agent(client: Client, pid: int, fn: Callable[[Agent], object], *, headl
                pace: float | None = None, home=PROFILES, reraise_interrupt: bool = False, label: str = "run"):
     """Open the profile in Camoufox, hand `fn` a ready Agent, and sync the profile back when it finishes.
 
-    While it runs the profile has the same control channel as an attached session, so `loft pigeon status|detach|leads|approve`
+    While it runs the profile has the same control channel as an attached session, so `pigeon agent status|detach|leads|approve`
     and the desktop app work on an unattended run too (and `detach` stops it cleanly). Ctrl-C also stops the agent cleanly so
     the profile (cookies, Pigeon state) still uploads; with `reraise_interrupt` the KeyboardInterrupt is raised again once
     that sync is done (so a multi-account rotation can stop)."""
@@ -59,7 +59,7 @@ def with_agent(client: Client, pid: int, fn: Callable[[Agent], object], *, headl
         host = PigeonHost(pid, home, central)
         st = host.st  # one State, shared by the agent and the control channel
         bridge = Bridge(page, pace if pace is not None else st.settings["pace"])
-        host.should_stop = getattr(context, "loft_stop", lambda: False)  # Ctrl+C / `loft stop` / the desktop's stop button
+        host.should_stop = getattr(context, "pigeon_stop", lambda: False)  # Ctrl+C / `pigeon stop` / the desktop's stop button
         bridge.on_tick = host.tick_for(bridge)  # control requests are answered on this thread, between the agent's steps
         agent = Agent(bridge, st, make_llm(st), central, diag_dir=home / str(pid) / "diagnostics")
         host.bridge, host.state, host.job, host.since = bridge, "running", label, time.time()

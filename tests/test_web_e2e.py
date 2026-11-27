@@ -1,8 +1,8 @@
-"""The new Next.js UI, end to end: real desktop backend, real Loft server, a profile launched in a headless Camoufox subprocess,
+"""The new Next.js UI, end to end: real desktop backend, real Pigeon server, a profile launched in a headless Camoufox subprocess,
 and the Pigeon drawer driven in a browser. Needs the UI built first (`npm run build` in web/)."""
 import pytest
 
-from loft.desktop import WEB
+from pigeon.desktop import WEB
 from tests.test_desktop_e2e import desktop  # noqa: F401  (the fixture)
 from tests.test_pigeon import HAVE, browser  # noqa: F401
 
@@ -13,7 +13,7 @@ pytestmark = [
 
 
 def test_the_new_ui_signs_up_adds_launches_and_drives_pigeon(desktop, browser):
-    url, loft_server, home = desktop
+    url, pigeon_server, home = desktop
     page = browser.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -21,7 +21,7 @@ def test_the_new_ui_signs_up_adds_launches_and_drives_pigeon(desktop, browser):
     page.goto(url)
 
     # sign up, create a team, add an account: all through the UI
-    page.fill("#srv", loft_server)
+    page.fill("#srv", pigeon_server)
     page.fill("#em", "owner@x.io")
     page.fill("#pw", "password1")
     page.click("button:text-is('Create account')")
@@ -36,8 +36,8 @@ def test_the_new_ui_signs_up_adds_launches_and_drives_pigeon(desktop, browser):
     # the app launches the account in its own subprocess; once its control channel is up, Pigeon's controls appear
     page.click("button:text-is('Open browser')")
     page.wait_for_selector("text=Open on this computer", timeout=60000)
-    page.wait_for_selector("button:text-is('Pigeon controls')", timeout=120000)
-    page.click("button:text-is('Pigeon controls')")
+    page.wait_for_selector("button:text-is('Agent controls')", timeout=120000)
+    page.click("button:text-is('Agent controls')")
     page.wait_for_selector("#pg h3")
 
     def panel():

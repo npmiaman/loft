@@ -11,8 +11,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
+from .compat import env
 from . import crypto
-from .client import HOME, Client, LoftError
+from .client import HOME, Client, PigeonError
 
 PROFILES = HOME / "profiles"
 
@@ -86,16 +87,16 @@ def expand_proxy_placeholders(proxy: Optional[dict], pid: int) -> Optional[dict]
     """Fill per-profile placeholders in a proxy's username/server, in place.
 
     This is how a proxynet gateway (or any rotating/session proxy) gives each
-    Loft profile its own STABLE exit: set the profile's proxy to the gateway with
-    a username like  country-us-session-loft-{pid}  (or just  session-loft-{pid}),
+    Pigeon profile its own STABLE exit: set the profile's proxy to the gateway with
+    a username like  country-us-session-pigeon-{pid}  (or just  session-pigeon-{pid}),
     and each profile resolves to its own sticky session while sharing one gateway
-    config. {pid} -> the profile id; {session} -> loft-<pid>.
+    config. {pid} -> the profile id; {session} -> pigeon-<pid>.
 
     proxynet routes by proxy username: 'session-<id>' is sticky (rendezvous-hashed
     to a node), 'country-<cc>-session-<id>' pins a country, 'node-<name>' a node."""
     if not proxy:
         return proxy
-    subs = {"{pid}": str(pid), "{session}": f"loft-{pid}"}
+    subs = {"{pid}": str(pid), "{session}": f"pigeon-{pid}"}
     for field in ("username", "server"):
         v = proxy.get(field)
         if isinstance(v, str):
@@ -187,7 +188,7 @@ def browser_locale(cc: str, seed: str = "", language: Optional[str] = None) -> l
       "en" (default)   English: en-US, or the country's own English variant (en-GB, en-IN, ...)
       "country"        the country's native language, then English (e.g. it-IT, it, en-US, en)
       "it-IT" (a tag)  that language, then English"""
-    language = (language or os.environ.get("LOFT_LANGUAGE") or "en").strip()
+    language = (language or env("LANGUAGE") or "en").strip()
     if language.lower() == "en":
         return english_locale(cc)
     if language.lower() == "country":
@@ -286,7 +287,7 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
         firefox_user_prefs={"network.dns.disableIPv6": True},
     )
     if not opts["canvas_noise"] and info.get("os") != host_os():
-        raise LoftError(400, f"canvas 'real' needs a {host_os()} profile on this machine; this one is {info.get('os')}")
+        raise PigeonError(400, f"canvas 'real' needs a {host_os()} profile on this machine; this one is {info.get('os')}")
     if not opts["canvas_noise"]:
         # Camoufox's own canvas cover is off in this mode, but Firefox's baseline fingerprint protection still randomizes canvas
         # readback on web pages (a fresh key per launch), so "real" wasn't stable: measured 3 distinct values over 3 launches of one
@@ -303,7 +304,7 @@ def camoufox_options(info: dict, user_data_dir: Path, headless: bool = False) ->
 
 # The voice a stock macOS picks as its default for a given language/region. Camoufox draws a voice list for the identity but marks
 # none of them as the default, and macOS then fills the gap with *this machine's* default voice (e.g. Rishi [en-IN] on an
-# Italian profile): a checker can read the mismatch. So Loft marks exactly one default itself, matching the profile's locale.
+# Italian profile): a checker can read the mismatch. So Pigeon marks exactly one default itself, matching the profile's locale.
 MAC_DEFAULT_VOICES = {
     "en-US": "Samantha", "en-GB": "Daniel", "en-AU": "Karen", "en-IN": "Rishi", "en-IE": "Moira", "en-ZA": "Tessa",
     "it-IT": "Alice", "fr-FR": "Thomas", "fr-CA": "Amélie", "fr-BE": "Thomas", "fr-CH": "Thomas", "de-DE": "Anna", "de-AT": "Anna",
@@ -361,7 +362,7 @@ def prepare_launch(info: dict, user_data_dir: Path, headless: bool = False, seed
     if info.get("proxy"):
         chk = check_proxy(info["proxy"])
         if not chk["ok"]:
-            raise LoftError(502, f"proxy not working: {chk['error']}")
+            raise PigeonError(502, f"proxy not working: {chk['error']}")
         opts["geoip"] = chk["ip"]
         expect["ip"] = chk["ip"]
         log(f"proxy exit {chk['ip']} ({chk['ms']} ms)")
@@ -453,7 +454,7 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
     """
     info = client.launch_info(pid)
     if not info.get("fingerprint"):
-        raise LoftError(500, "profile has no fingerprint")
+        raise PigeonError(500, "profile has no fingerprint")
     expand_proxy_placeholders(info.get("proxy"), pid)
     tid = info["team_id"]
     lk = client.lock(pid)
@@ -487,14 +488,14 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
         log(f"launching '{info['name']}'" + (f" via {info['proxy']['server']}" if info.get("proxy") else ""))
         err: Optional[BaseException] = None
         with Camoufox(**opts) as context:
-            context.loft_info = info  # type: ignore[attr-defined]
+            context.pigeon_info = info  # type: ignore[attr-defined]
             try:  # check the real browser against what its language and exit IP imply; never let the check break a launch
-                context.loft_audit = audit_identity(context, expect)  # type: ignore[attr-defined]
-                bad = [r for r in context.loft_audit if not r["ok"]]
+                context.pigeon_audit = audit_identity(context, expect)  # type: ignore[attr-defined]
+                bad = [r for r in context.pigeon_audit if not r["ok"]]
                 log("identity consistent with the exit IP and language" if not bad else
                     "WARNING identity mismatch: " + "; ".join(f"{r['signal']} is {r['actual']}, expected {r['expected']}" for r in bad))
             except Exception as e:
-                context.loft_audit = []  # type: ignore[attr-defined]
+                context.pigeon_audit = []  # type: ignore[attr-defined]
                 log(f"(identity audit skipped: {type(e).__name__}: {str(e)[:80]})")
             try:
                 yield context
@@ -509,7 +510,7 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
             log(f"synced v{up['version']} ({len(blob) // 1024} KB)")
             if result is not None:
                 result.update(version=up["version"], bytes=len(blob))
-        except LoftError as e:
+        except PigeonError as e:
             keep = local.root / f"unsynced-{server_v}.zip"
             keep.write_bytes(blob)
             log(f"upload failed ({e}); kept local copy at {keep}")
@@ -520,7 +521,7 @@ def open_profile(client: Client, pid: int, *, headless: bool = False, home: Path
         stop.set()
         try:
             client.unlock(pid, lock_tok)
-        except LoftError:
+        except PigeonError:
             pass
 
 
@@ -570,7 +571,7 @@ def open_data(client: Client, pid: int, *, home: Path = PROFILES, log: Callable[
             log(f"synced v{up['version']} ({len(blob) // 1024} KB)")
             if result is not None:
                 result.update(version=up["version"], bytes=len(blob))
-        except LoftError as e:
+        except PigeonError as e:
             keep = local.root / f"unsynced-{server_v}.zip"
             keep.write_bytes(blob)
             log(f"upload failed ({e}); kept local copy at {keep}")
@@ -581,7 +582,7 @@ def open_data(client: Client, pid: int, *, home: Path = PROFILES, log: Callable[
         stop.set()
         try:
             client.unlock(pid, lock_tok)
-        except LoftError:
+        except PigeonError:
             pass
 
 
@@ -598,14 +599,14 @@ def run_profile(client: Client, pid: int, *, headless: bool = False,
     try:
         with open_profile(client, pid, headless=headless, home=home, log=log, result=result) as context:
             should_stop = lambda: stop.is_set() or stop_file.exists()
-            context.loft_stop = should_stop  # type: ignore[attr-defined]  sessions can watch for Ctrl+C / `loft stop` too
+            context.pigeon_stop = should_stop  # type: ignore[attr-defined]  sessions can watch for Ctrl+C / `pigeon stop` too
             if session:
                 session(context)
             else:
                 # keeps the window open, serves the session's control channel (so tools like Pigeon can attach), and ends on
                 # window close or a stop request
                 from .session import interactive
-                interactive(context, pid, context.loft_info, home=home, log=log, client=client, should_stop=should_stop)
+                interactive(context, pid, context.pigeon_info, home=home, log=log, client=client, should_stop=should_stop)
     finally:
         restore()
         stop_file.unlink(missing_ok=True)
@@ -613,7 +614,7 @@ def run_profile(client: Client, pid: int, *, headless: bool = False,
 
 
 def request_stop(pid: int, home: Optional[Path] = None) -> None:
-    """Ask a running `loft run` (any process on this machine) to close and sync."""
+    """Ask a running `pigeon run` (any process on this machine) to close and sync."""
     root = LocalProfile(pid, home or PROFILES).root  # PROFILES is read now, not when this module loaded (it can be re-pointed)
     root.mkdir(parents=True, exist_ok=True)
     (root / "stop").touch()
@@ -704,7 +705,7 @@ BUNDLE_MAGIC = b"LFTB"
 
 
 def export_bundle(client: Client, pid: int, passphrase: Optional[str] = None) -> bytes:
-    """A portable .loftprofile: settings, fingerprint, proxy and the latest browser data."""
+    """A portable .pigeonprofile: settings, fingerprint, proxy and the latest browser data."""
     info = client.launch_info(pid)
     _, data = client.download(pid, tid=info["team_id"])
     manifest = {"format": "loft-profile/1", "name": info["name"], "os": info["os"], "notes": info["notes"],
@@ -726,16 +727,16 @@ def import_bundle(client: Client, tid: int, blob: bytes, passphrase: Optional[st
                   name: Optional[str] = None) -> dict:
     if blob[:4] == BUNDLE_MAGIC:
         if not passphrase:
-            raise LoftError(400, "this bundle is encrypted: a passphrase is needed")
+            raise PigeonError(400, "this bundle is encrypted: a passphrase is needed")
         try:
             blob = crypto.decrypt(crypto.passphrase_key(passphrase, blob[4:20]), blob[20:], "bundle")
         except Exception:
-            raise LoftError(400, "wrong passphrase")
+            raise PigeonError(400, "wrong passphrase")
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         m = json.loads(z.read("manifest.json"))
         data = z.read("data.zip") if "data.zip" in z.namelist() else None
     if m.get("format") != "loft-profile/1":
-        raise LoftError(400, "not a Loft profile bundle")
+        raise PigeonError(400, "not a Pigeon profile bundle")
     p = client.create_profile(tid, name=name or m["name"], os=m["os"], notes=m.get("notes", ""),
                               tags=m.get("tags", []), start_url=m.get("start_url", ""),
                               fingerprint=m["fingerprint"], proxy=m.get("proxy"))
@@ -758,7 +759,7 @@ def export_team(client: Client, tid: int, passphrase: str, log: Callable[[str], 
 
     A passphrase is required -- this file holds every logged-in session the team has."""
     if not passphrase:
-        raise LoftError(400, "a team backup needs a passphrase (it contains every session)")
+        raise PigeonError(400, "a team backup needs a passphrase (it contains every session)")
     profiles = client.profiles(tid)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -785,11 +786,11 @@ def import_team(client: Client, tid: int, blob: bytes, passphrase: str,
     """Restore a team backup into team `tid`. Creates fresh profiles (new ids); does not delete
     or merge existing ones. Templates are recreated. Returns a summary."""
     if blob[:4] != BACKUP_MAGIC:
-        raise LoftError(400, "not a Loft team backup")
+        raise PigeonError(400, "not a Pigeon team backup")
     try:
         raw = crypto.decrypt(crypto.passphrase_key(passphrase, blob[4:20]), blob[20:], "backup")
     except Exception:
-        raise LoftError(400, "wrong passphrase")
+        raise PigeonError(400, "wrong passphrase")
     created = []
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
         names = z.namelist()
@@ -824,7 +825,7 @@ def bulk_create(client: Client, tid: int, count: int, *, name: str = "Profile {n
                 proxies: Optional[list[dict]] = None, start_n: int = 1, **fields) -> list[dict]:
     """Create `count` profiles, each with its own fingerprint. Proxies are assigned round-robin."""
     if count < 1 or count > 500:
-        raise LoftError(400, "count must be 1-500")
+        raise PigeonError(400, "count must be 1-500")
     out = []
     fields.setdefault("canvas", default_canvas(os_name))
     for i in range(count):

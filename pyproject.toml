@@ -1,7 +1,7 @@
 [project]
-name = "loft"
+name = "pigeon"
 version = "0.1.0"
-description = "Loft: team browser profiles on Camoufox with end-to-end encryption"
+description = "Pigeon: team browser profiles on Camoufox with end-to-end encryption"
 readme = "README.md"
 requires-python = ">=3.12"
 # Base = what every install needs (the client, the server, the CLI parser).
@@ -25,16 +25,17 @@ desktop = ["camoufox[geoip]>=0.5.9", "socksio>=1.0.0", "pywebview>=5"]
 build = ["pyinstaller>=6"]
 
 [project.scripts]
-loft = "loft.cli:entry"
+pigeon = "pigeon.cli:entry"
+loft = "pigeon.cli:entry"  # the old command name, kept so existing scripts and muscle memory keep working
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["loft"]
+packages = ["pigeon"]
 # The built Next.js UI is gitignored (hatch honours that), so include it explicitly when it has been built.
-artifacts = ["loft/web_ui/**"]
+artifacts = ["pigeon/web_ui/**"]
 
 [tool.uv]
 # Local dev and the test suite need everything: browser, server drivers, moto.

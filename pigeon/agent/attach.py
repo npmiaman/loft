@@ -1,4 +1,4 @@
-"""Attach the Pigeon agent to a live Loft browser session, with all of its functionality.
+"""Attach the Pigeon agent to a live Pigeon browser session, with all of its functionality.
 
 The session's own thread owns the browser (Playwright's sync API is bound to it), so everything that touches Pigeon's
 state or the browser runs there. The control server's HTTP thread only hands work over and waits for the answer:
@@ -44,7 +44,7 @@ class PigeonHost:
         self.since: float | None = None
         self.last: dict | None = None
         self.bridge: Bridge | None = None
-        self.should_stop: Callable[[], bool] = lambda: False  # Ctrl+C / `loft stop` on the session: ends a running job too
+        self.should_stop: Callable[[], bool] = lambda: False  # Ctrl+C / `pigeon stop` on the session: ends a running job too
 
     def tick_for(self, bridge: Bridge) -> Callable[[], None]:
         """Called by the bridge on every step: answer control requests, and wind a job down if the session was told to stop."""
@@ -126,11 +126,11 @@ class PigeonHost:
         needs_llm = kind in NEEDS_LLM or (kind == "run" and args.get("mode", "find") != "dm") or (kind == "scan" and not args.get("no_score"))
         with self.lock:
             if self.state != "idle":
-                return 409, {"detail": f"Pigeon is already {self.state} ({self.job}) in this session"}
+                return 409, {"detail": f"The agent is already {self.state} ({self.job}) in this session"}
             if needs_llm and not self.llm_factory(self.st):
-                return 400, {"detail": "No DeepSeek key: `loft pigeon config --deepseek-key KEY` or set DEEPSEEK_API_KEY."}
+                return 400, {"detail": "No DeepSeek key: `pigeon agent config --deepseek-key KEY` or set DEEPSEEK_API_KEY."}
             if kind == "run" and args.get("mode", "find") != "dm" and not self.st.product:
-                return 400, {"detail": f"Set up the product first: `loft pigeon setup {self.pid} URL`."}
+                return 400, {"detail": f"Set up the product first: `pigeon agent setup {self.pid} URL`."}
             self.state, self.job, self.mode = "running", kind, args.get("mode") if kind == "run" else None
             self.since, self.last = time.time(), None
             self.jobs.put((kind, args))
@@ -192,7 +192,7 @@ class PigeonHost:
             self.last = dict(kind=kind, ok=False, error="stopped", at=time.time())
         except Exception as e:
             self.last = dict(kind=kind, ok=False, error=str(e), at=time.time())
-            self.st.log("error", f"Pigeon {kind}: {e}")
+            self.st.log("error", f"Agent {kind}: {e}")
         finally:
             if page is not None and own:
                 try:

@@ -1,15 +1,15 @@
-"""An unattended `loft pigeon run` (Loft launches the browser itself) has the same control channel as an attached session:
+"""An unattended `pigeon agent run` (Pigeon launches the browser itself) has the same control channel as an attached session:
 watch it, work on its state, and stop it cleanly from another thread. Real server, real launch/sync, Camoufox if installed."""
 import threading
 import time
 
 import pytest
 
-from loft import control
-from loft.client import LoftError
-from loft.pigeon import runner
-from loft.pigeon.llm import Llm
-from loft.pigeon.runner import with_agent, with_state
+from pigeon import control
+from pigeon.client import PigeonError
+from pigeon.agent import runner
+from pigeon.agent.llm import Llm
+from pigeon.agent.runner import with_agent, with_state
 from tests.conftest import FP
 from tests.test_pigeon import HAVE, fake_deepseek, fast, mock_reddit, needs_browser  # noqa: F401
 
@@ -57,7 +57,7 @@ def test_unattended_run_can_be_watched_edited_and_stopped(team, tmp_path, fast, 
             break
         time.sleep(0.3)
     assert st["state"] == "running" and st["job"] == "run" and st["product"] == "Acme"
-    with pytest.raises(LoftError, match="already running"):
+    with pytest.raises(PigeonError, match="already running"):
         call("POST", "/pigeon/job", {"kind": "scan", "args": {"no_score": True}})  # one job at a time
 
     # state operations are answered on the browser thread, between the agent's steps, while it works

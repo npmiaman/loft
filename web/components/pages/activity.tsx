@@ -1,12 +1,12 @@
 "use client";
 import * as React from "react";
 import { api } from "@/lib/api";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import { Card, PageHead } from "../ui/bits";
 import { Rows } from "./overview";
 
 export function ActivityPage() {
-  const { s, canAdmin } = useLoft();
+  const { s, canAdmin } = usePigeon();
   const [rows, setRows] = React.useState<any[] | null>(null);
   React.useEffect(() => { if (canAdmin) api<any[]>("GET", "/audit").then(setRows).catch(() => setRows([])); }, [canAdmin]);
   if (!canAdmin) return <p className="text-mute">Only owners and admins can see team activity.</p>;

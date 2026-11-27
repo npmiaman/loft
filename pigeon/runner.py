@@ -1,6 +1,6 @@
 """Cloud runner: runs profiles on a server and streams them to any browser (desktop or phone).
 
-A client starts a session by sending the runner its Loft token and the team key
+A client starts a session by sending the runner its Pigeon token and the team key
 for that profile (over TLS). The runner then does what a desktop would: lock, pull,
 decrypt, launch headless Camoufox, and sync back on stop. Decrypted data lives in a
 temp dir that is deleted when the session ends. Keys are held in memory only.
@@ -41,7 +41,7 @@ class StartIn(BaseModel):
     team_key: str
     key_epoch: int
     profile_id: int
-    ca: Optional[str] = None  # PEM text of the Loft server's CA, if self-signed
+    ca: Optional[str] = None  # PEM text of the Pigeon server's CA, if self-signed
 
 
 class Session:
@@ -58,7 +58,7 @@ class Session:
         self.tabs: list[dict] = []
         self.name = ""
         self.started = time.time()
-        self.home = Path(tempfile.mkdtemp(prefix="loft-run-"))
+        self.home = Path(tempfile.mkdtemp(prefix="pigeon-run-"))
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
@@ -67,12 +67,12 @@ class Session:
         from .engine import open_profile
         try:
             with open_profile(self.client, self.pid, headless=True, home=self.home, log=self.log.append) as ctx:
-                self.name = ctx.loft_info["name"]
+                self.name = ctx.pigeon_info["name"]
                 page = ctx.pages[0] if ctx.pages else ctx.new_page()
                 state = {"page": page}
                 ctx.on("page", lambda p: state.update(page=p))
-                if ctx.loft_info.get("start_url"):
-                    page.goto(ctx.loft_info["start_url"], wait_until="commit")
+                if ctx.pigeon_info.get("start_url"):
+                    page.goto(ctx.pigeon_info["start_url"], wait_until="commit")
                 self.status = "running"
                 last = 0.0
                 while not self.stop.is_set():
@@ -155,7 +155,7 @@ def _safe_title(p) -> str:
 
 
 def create_runner(key: str) -> FastAPI:
-    app = FastAPI(title="Loft runner")
+    app = FastAPI(title="Pigeon runner")
     sessions: dict[str, Session] = {}
 
     def need_key(k: str) -> None:
@@ -277,8 +277,8 @@ def start_cloud_session(client: Client, pid: int, runner: dict) -> dict:
             detail = r.json().get("detail", r.text)
         except Exception:
             detail = r.text
-        from .client import LoftError
-        raise LoftError(r.status_code, f"runner: {detail}")
+        from .client import PigeonError
+        raise PigeonError(r.status_code, f"runner: {detail}")
     out = r.json()
     out["view"] = runner["url"] + out["view"]
     return out

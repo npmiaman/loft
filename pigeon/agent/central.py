@@ -1,6 +1,6 @@
 """The central brain: the team's shared memory across every browser session, account and teammate.
 
-It lives on the Loft server (see `pigeon_events` there). Before an account DMs someone or comments in a thread it
+It lives on the Pigeon server (see `pigeon_events` there). Before an account DMs someone or comments in a thread it
 *claims* that target atomically; if another session already has, the claim is refused and says who. The same
 record feeds the writing prompts, so the agent knows what the team has already said and where."""
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 
-from ..client import Client, LoftError
+from ..client import Client, PigeonError
 
 
 class Unreachable(Exception):
@@ -48,7 +48,7 @@ class CentralBrain:
     def _call(self, fn, *a, **kw):
         try:
             return fn(*a, **kw)
-        except LoftError as e:
+        except PigeonError as e:
             if e.status in (409, 429):  # answers, not outages: "someone has it" / "a team limit is reached"
                 raise
             raise Unreachable(f"central brain: {e.detail}")
@@ -62,7 +62,7 @@ class CentralBrain:
                 fields["body"] = self._call(self.c.seal_text, self.tid, fields["body"])
             out = self._call(self.c.pigeon_claim, self.tid, kind=kind, target=target, profile_id=self.pid, **fields)
             return Claim(True, id=out["id"])
-        except LoftError as e:  # 409: someone has it / it's ours; 429: a team limit
+        except PigeonError as e:  # 409: someone has it / it's ours; 429: a team limit
             try:
                 d = json.loads(e.detail)
             except (ValueError, TypeError):
@@ -76,7 +76,7 @@ class CentralBrain:
             try:
                 self._call(self.c.pigeon_finish, self.tid, claim.id, status, error[:500])
             except Unreachable:
-                pass  # the claim stays 'claimed' (safe side); an admin can release it from `loft pigeon brain`
+                pass  # the claim stays 'claimed' (safe side); an admin can release it from `pigeon agent brain`
 
     # ---- reads (fail open: worst case we do a little redundant work) ---------------------------
     def seen(self, kind: str, targets: list[str]) -> dict[str, dict]:
@@ -111,7 +111,7 @@ class CentralBrain:
             self.c.pigeon_set_account(self.tid, self.pid, username)
             self._own = (0.0, self._own[1])
             return None
-        except LoftError as e:
+        except PigeonError as e:
             return e.detail
         except Exception as e:
             return f"central brain unreachable: {e}"

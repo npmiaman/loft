@@ -3,7 +3,7 @@ import { AlertTriangle, Globe, MoreHorizontal, Play, Square } from "lucide-react
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
 import { api } from "@/lib/api";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import type { Job, Profile } from "@/lib/types";
 import { friendlyError, msgs, people, pigeonWords } from "@/lib/utils";
 import { Avatar, Dot, Pill } from "../ui/bits";
@@ -25,7 +25,7 @@ export function AccountRow({ p, mode, setMode, onPigeon, onEdit, onShare, onCook
   p: Profile; mode: string; setMode: (m: string) => void; onPigeon: () => void; onEdit: () => void; onShare: () => void; onCookies: () => void;
   hasRunners: boolean; canAdmin: boolean;
 }) {
-  const { s, act } = useLoft();
+  const { s, act } = usePigeon();
   const j = s.jobs?.[`run-${p.id}`];
   const st = status(p, j);
   const pg = p.running_here ? j?.pigeon : null;
@@ -70,14 +70,14 @@ export function AccountRow({ p, mode, setMode, onPigeon, onEdit, onShare, onCook
         ) : (
           <>
             {pg && (pg.state !== "idle"
-              ? <Button onClick={() => act(() => api("POST", `/profiles/${p.id}/pigeon`, { action: "stop" }))}>Stop Pigeon</Button>
+              ? <Button onClick={() => act(() => api("POST", `/profiles/${p.id}/pigeon`, { action: "stop" }))}>Stop agent</Button>
               : <>
-                  <Select aria-label="What should Pigeon do?" value={mode} onChange={(e) => setMode(e.target.value)} className="w-56">
+                  <Select aria-label="What should the agent do?" value={mode} onChange={(e) => setMode(e.target.value)} className="w-56">
                     {MODES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
                   </Select>
-                  <Button variant="primary" onClick={() => act(() => api("POST", `/profiles/${p.id}/pigeon`, { action: "start", mode }))}>Start Pigeon</Button>
+                  <Button variant="primary" onClick={() => act(() => api("POST", `/profiles/${p.id}/pigeon`, { action: "start", mode }))}>Start agent</Button>
                 </>)}
-            {pg && <Button onClick={onPigeon}>Pigeon controls</Button>}
+            {pg && <Button onClick={onPigeon}>Agent controls</Button>}
             <Button onClick={() => act(() => api("POST", `/profiles/${p.id}/stop`))} title="Closes the browser and saves its cookies to the team"><Square className="size-3 fill-current" aria-hidden /> Close &amp; save</Button>
           </>
         )}

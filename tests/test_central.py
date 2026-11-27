@@ -1,11 +1,11 @@
-"""The central brain on the Loft server: claims are atomic across accounts, releases work, history and summary add up."""
+"""The central brain on the Pigeon server: claims are atomic across accounts, releases work, history and summary add up."""
 import json
 import threading
 
 import pytest
 
-from loft.client import LoftError
-from loft.pigeon.central import CentralBrain, Unreachable
+from pigeon.client import PigeonError
+from pigeon.agent.central import CentralBrain, Unreachable
 from tests.conftest import FP
 
 # Every test here runs twice: SQLite + files, and real Postgres + S3 (moto), as in test_server.py.
@@ -101,18 +101,18 @@ def test_permissions(team, mk):
     owner, member, tid, a, _ = team
     outsider = mk()
     outsider.register("x@x.io", "password1", invite=owner.invite(owner.create_team("Other")["id"])["code"])
-    with pytest.raises(LoftError, match="404"):
+    with pytest.raises(PigeonError, match="404"):
         outsider.pigeon_summary(tid)
-    with pytest.raises(LoftError):
+    with pytest.raises(PigeonError):
         outsider.pigeon_claim(tid, kind="dm", target="x")
     # a member may not report under a profile they cannot access
-    with pytest.raises(LoftError, match="profile not found"):
+    with pytest.raises(PigeonError, match="profile not found"):
         member.pigeon_claim(tid, kind="dm", target="x", profile_id=a)
     # only the claimer or an admin settles a claim
     cid = member.pigeon_claim(tid, kind="dm", target="shared")["id"]
     other = mk()
     other.register("y@x.io", "password1", invite=owner.invite(tid, "member")["code"])
-    with pytest.raises(LoftError, match="needs role"):
+    with pytest.raises(PigeonError, match="needs role"):
         other.pigeon_finish(tid, cid, "failed")
     owner.pigeon_finish(tid, cid, "failed", "released by admin")
     assert other.pigeon_claim(tid, kind="dm", target="shared")["id"]

@@ -2,7 +2,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import type { Profile } from "@/lib/types";
 import { Button } from "../ui/button";
 import { Modal } from "../ui/dialog";
@@ -33,7 +33,7 @@ function Advanced({ os, setOs, canvas, setCanvas, host }: { os: string; setOs: (
 }
 
 export function AddAccount({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { s, act } = useLoft();
+  const { s, act } = usePigeon();
   const host = s.host_os;
   const [f, setF] = React.useState({ name: "", proxy: "", url: "", tags: "", notes: "" });
   const [os, setOs] = React.useState(host); const [canvas, setCanvas] = React.useState("real");
@@ -73,7 +73,7 @@ export function AddAccount({ open, onClose }: { open: boolean; onClose: () => vo
 }
 
 export function AddMany({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { s, act } = useLoft();
+  const { s, act } = usePigeon();
   const [f, setF] = React.useState({ count: "10", name: "Reddit {n}", proxies: "", tags: "reddit", url: "" });
   const [busy, setBusy] = React.useState(false);
   const lines = f.proxies.split("\n").filter((l) => l.trim()).length;
@@ -103,7 +103,7 @@ export function AddMany({ open, onClose }: { open: boolean; onClose: () => void 
 }
 
 export function EditAccount({ p, onClose }: { p: Profile | null; onClose: () => void }) {
-  const { act } = useLoft();
+  const { act } = usePigeon();
   const [f, setF] = React.useState({ name: "", proxy: "", url: "", notes: "", canvas: "real" });
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
@@ -132,7 +132,7 @@ export function EditAccount({ p, onClose }: { p: Profile | null; onClose: () => 
 }
 
 export function ShareAccount({ p, onClose }: { p: Profile | null; onClose: () => void }) {
-  const { s } = useLoft();
+  const { s } = usePigeon();
   const [shares, setShares] = React.useState<{ user_id: number; level: string }[]>([]);
   React.useEffect(() => { if (p) api("GET", `/profiles/${p.id}/shares`).then(setShares).catch((e) => toast.error(e.message)); }, [p]);
   if (!p) return null;
@@ -161,7 +161,7 @@ export function ShareAccount({ p, onClose }: { p: Profile | null; onClose: () =>
 }
 
 export function Cookies({ p, onClose }: { p: Profile | null; onClose: () => void }) {
-  const { act } = useLoft();
+  const { act } = usePigeon();
   const [text, setText] = React.useState(""); const [busy, setBusy] = React.useState(false);
   if (!p) return null;
   const imp = async () => { setBusy(true); const ok = await act(async () => { const r = await api<{ cookies: number }>("POST", `/profiles/${p.id}/cookies`, { text }); toast.success(`Imported ${r.cookies} cookies`); }); setBusy(false); if (ok) { setText(""); onClose(); } };

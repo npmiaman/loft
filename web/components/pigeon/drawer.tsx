@@ -2,7 +2,7 @@
 import { ArrowRight, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import { msgs, people, pigeonWords } from "@/lib/utils";
 import { Avatar, Callout, Dot } from "../ui/bits";
 import { Button } from "../ui/button";
@@ -20,8 +20,8 @@ function Next({ go }: { go: (t: string) => void }) {
   const n = (k: string) => st.leads?.[k] ?? 0;
   let text: React.ReactNode, to: [string, string] | null = null;
   if (st.state === "stopping") text = "Stopping… the browser stays open.";
-  else if (busy) text = "Pigeon is working in its own tab. You can keep using the browser. Nothing for you to do.";
-  else if (!st.product) { text = <><b>Start here:</b> tell Pigeon what you're promoting, so it knows who to look for.</>; to = ["setup", "Go to Product"]; }
+  else if (busy) text = "The agent is working in its own tab. You can keep using the browser. Nothing for you to do.";
+  else if (!st.product) { text = <><b>Start here:</b> tell the agent what you're promoting, so it knows who to look for.</>; to = ["setup", "Go to Product"]; }
   else if (n("draft")) { text = <><b>{n("draft")} message{n("draft") > 1 ? "s are" : " is"} waiting for you.</b> Read them and press Approve.</>; to = ["leads", "Review messages"]; }
   else if (n("ready")) { text = <><b>{n("ready")} approved message{n("ready") > 1 ? "s are" : " is"} ready.</b> Press Start (mode: send approved messages) to send them.</>; to = ["run", "Go to Run"]; }
   else if (!st.stats.leads) { text = <><b>Next:</b> press Start to find people to message.</>; to = ["run", "Go to Run"]; }
@@ -33,7 +33,7 @@ function Next({ go }: { go: (t: string) => void }) {
 }
 
 function Body({ id, onClose }: { id: number; onClose: () => void }) {
-  const { profile } = useLoft(); const pg = usePg(); const p = profile(id);
+  const { profile } = usePigeon(); const pg = usePg(); const p = profile(id);
   const [tab, setTab] = React.useState<string>("leads");
   const Cur = TABS.find((t) => t[0] === tab)![2];
   const st = pg.st;
@@ -43,7 +43,7 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
         <div className="flex items-center gap-3">
           <Avatar name={p?.name ?? "?"} size={40} />
           <div>
-            <h3 className="text-[17px] font-semibold tracking-tight">Pigeon · {p?.name ?? `account ${id}`}</h3>
+            <h3 className="text-[17px] font-semibold tracking-tight">Agent · {p?.name ?? `account ${id}`}</h3>
             {st && (
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 text-[12.5px] text-mute">
                 <span className="inline-flex items-center gap-1.5 font-medium text-ink"><Dot tone={st.state === "idle" ? "idle" : "ok"} /> {pigeonWords(st)}</span>
@@ -81,7 +81,7 @@ const fetchStop = (id: number) => import("@/lib/api").then(({ api }) => api("POS
 
 export function PigeonDrawer({ id, onClose }: { id: number | null; onClose: () => void }) {
   return (
-    <Drawer open={id != null} onOpenChange={(o) => !o && onClose()} label="Pigeon controls">
+    <Drawer open={id != null} onOpenChange={(o) => !o && onClose()} label="Agent controls">
       {id != null && <PgProvider id={id} goto={() => {}}><Body id={id} onClose={onClose} /></PgProvider>}
     </Drawer>
   );

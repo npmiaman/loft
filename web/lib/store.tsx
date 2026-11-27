@@ -2,28 +2,28 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { api } from "./api";
-import type { LoftState, Profile } from "./types";
+import type { PigeonState, Profile } from "./types";
 
 type Ctx = {
-  s: LoftState;
+  s: PigeonState;
   refresh: () => Promise<void>;
   /** Run an action, refresh the state, and show any error as a toast. Resolves true on success. */
   act: (fn: () => Promise<unknown>, ok?: string) => Promise<boolean>;
   canAdmin: boolean;
   profile: (id: number) => Profile | undefined;
 };
-const LoftCtx = React.createContext<Ctx | null>(null);
-export const useLoft = () => React.useContext(LoftCtx)!;
+const PigeonCtx = React.createContext<Ctx | null>(null);
+export const usePigeon = () => React.useContext(PigeonCtx)!;
 
 /** Polls /api/state every 3 s (and not while the window is hidden). The UI only re-renders when something actually changed. */
-export function LoftProvider({ children }: { children: (s: LoftState | null, error: string | null, refresh: () => Promise<void>) => React.ReactNode }) {
-  const [s, setS] = React.useState<LoftState | null>(null);
+export function PigeonProvider({ children }: { children: (s: PigeonState | null, error: string | null, refresh: () => Promise<void>) => React.ReactNode }) {
+  const [s, setS] = React.useState<PigeonState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const last = React.useRef("");
 
   const refresh = React.useCallback(async () => {
     try {
-      const n = await api<LoftState>("GET", "/state");
+      const n = await api<PigeonState>("GET", "/state");
       const j = JSON.stringify(n);
       if (j !== last.current) { last.current = j; setS(n); }
       setError(null);
@@ -49,5 +49,5 @@ export function LoftProvider({ children }: { children: (s: LoftState | null, err
     profile: (id: number) => s.profiles?.find((p) => p.id === id),
   }), [s, refresh, act]);
 
-  return <LoftCtx.Provider value={value as Ctx}>{children(s, error, refresh)}</LoftCtx.Provider>;
+  return <PigeonCtx.Provider value={value as Ctx}>{children(s, error, refresh)}</PigeonCtx.Provider>;
 }

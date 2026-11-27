@@ -13,9 +13,9 @@ import pytest
 
 from tests.test_pigeon import HAVE, mock_reddit, page_global
 
-ROOT = Path(__file__).parent.parent.parent  # the extension repo, next to loft/
+ROOT = Path(__file__).parent.parent.parent  # the extension repo, next to pigeon/
 pytestmark = pytest.mark.skipif(not (HAVE and (ROOT / "package.json").exists() and shutil.which("npm")),
-                                reason="needs Camoufox, the extension repo next to loft/, and npm")
+                                reason="needs Camoufox, the extension repo next to pigeon/, and npm")
 
 SEND = """new Promise(res => { const id = Math.random();
   window.addEventListener('message', function h(e) { if (e.data && e.data.__pigeonTest === 'res' && e.data.id === id) { window.removeEventListener('message', h); res(e.data.res); } });

@@ -1,6 +1,6 @@
-"""`loft pigeon ...`: all of Pigeon's functionality, from the terminal.
+"""`pigeon agent ...`: all of Pigeon's functionality, from the terminal.
 
-Every command works two ways. If the profile is open on this machine (`loft run ID`), it talks to that live session over
+Every command works two ways. If the profile is open on this machine (`pigeon run ID`), it talks to that live session over
 its control channel. Otherwise it locks the profile, does the work (opening a browser only if it needs one) and syncs."""
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ import sys
 import time
 
 from .. import control
-from ..client import LoftError
+from ..client import PigeonError
 from .runner import central_for, make_llm, with_agent, with_state
 from .state import load_key, save_key
 from . import ops
 
 
 def register(sub) -> None:
-    p = sub.add_parser("pigeon", help="Reddit outreach agent: runs inside a profile, shares one memory across the team")
+    p = sub.add_parser("agent", aliases=["pigeon"], help="Reddit outreach agent: runs inside a profile, shares one memory across the team")  # `pigeon pigeon` still works for old scripts
     ps = p.add_subparsers(dest="pcmd", required=True)
 
     def cmd(name, help, *args, headless=False):
@@ -29,7 +29,7 @@ def register(sub) -> None:
         return x
 
     A = lambda *n, **k: (n, k)
-    cmd("config", "DeepSeek key (stored in ~/.loft/pigeon.json, never synced)", A("--deepseek-key"),
+    cmd("config", "DeepSeek key (stored in ~/.pigeon-app/pigeon.json, never synced)", A("--deepseek-key"),
         A("--model", choices=["deepseek-flash", "deepseek-v4-pro"]))
     cmd("status", "stats, today's cap, pauses, agent state")
     # --- running the agent
@@ -54,7 +54,7 @@ def register(sub) -> None:
         A("--tag", action="append", default=None, help="add: tags for the new accounts (default: reddit). ls/check: only these tags"),
         A("--no-check", action="store_true", help="add: don't test the proxies before creating accounts"),
         A("--allow-duplicate-exits", action="store_true", help="add: create them even if two proxies exit from the same IP"))
-    cmd("attach", "connect the agent to a profile that is already open (`loft run ID`)", A("--mode", choices=["full", "find", "dm"], default="find"),
+    cmd("attach", "connect the agent to a profile that is already open (`pigeon run ID`)", A("--mode", choices=["full", "find", "dm"], default="find"),
         A("--minutes", type=float), A("--pace", type=float, help="0.5 (slow) .. 2 (fast)"), A("--follow", action="store_true"))
     cmd("detach", "stop the agent in an open profile (the browser stays open)")
     # --- setup
@@ -84,7 +84,7 @@ def register(sub) -> None:
     cmd("send", "DM one lead now (bypasses the queue, not the governor or the team brain)", A("username"), headless=True)
     cmd("scan", "Page DMer: queue everyone on the Reddit tab you have open (or --url)", A("--url"), A("--no-score", action="store_true"), headless=True)
     cmd("replies", "scan Reddit chat for replies to sent DMs", headless=True)
-    cmd("doctor", "read-only check that Reddit's markup matches what Pigeon expects on this account (run it first on a new account)", headless=True)
+    cmd("doctor", "read-only check that Reddit's markup matches what the agent expects on this account (run it first on a new account)", headless=True)
     # --- comments and posts
     cmd("opps", "comment opportunities: list, --post ID to publish, --skip ID", A("--post", metavar="ID"), A("--skip", metavar="ID"), headless=True)
     cmd("ideas", "post ideas: list, --generate, --submit ID (the agent posts it), --posted ID (you posted it yourself), --history",
@@ -155,7 +155,7 @@ def run_browser(c, pid: int, kind: str, args: dict, headless: bool = False) -> d
             raise SystemExit(f"{kind} failed: {last.get('error')}")
         return last
     if kind == "scan" and not args.get("url"):
-        raise SystemExit("scan reads the Reddit tab you have open: start the profile with `loft run ID` first, or pass --url")
+        raise SystemExit("scan reads the Reddit tab you have open: start the profile with `pigeon run ID` first, or pass --url")
     out: list = []
     with_agent(c, pid, lambda a: out.append(ops.run_browser_op(a, kind, args)), headless=headless)
     return out[0] if out else {}
@@ -203,18 +203,18 @@ def handle(args, c, get_tid=None) -> None:
         _show(run_state(c, pid, "status"))
     elif cmd == "run":
         if live:
-            raise SystemExit(f"profile {pid} is already open here: use `loft pigeon attach {pid}` to run the agent in it")
-        print(f"starting. From another terminal: `loft pigeon status {pid}` to watch, `loft pigeon detach {pid}` to stop it cleanly.")
+            raise SystemExit(f"profile {pid} is already open here: use `pigeon agent attach {pid}` to run the agent in it")
+        print(f"starting. From another terminal: `pigeon agent status {pid}` to watch, `pigeon agent detach {pid}` to stop it cleanly.")
         run_browser(c, pid, "run", dict(mode=args.mode, minutes=args.minutes, pace=args.pace), args.headless)
     elif cmd == "attach":
         t0 = time.time()
         control.request(pid, "POST", "/pigeon/start", dict(mode=args.mode, minutes=args.minutes, pace=args.pace))
-        print(f"Pigeon attached to profile {pid} ({args.mode}). `loft pigeon status {pid}` to watch, `loft pigeon detach {pid}` to stop.")
+        print(f"Agent attached to profile {pid} ({args.mode}). `pigeon agent status {pid}` to watch, `pigeon agent detach {pid}` to stop.")
         if args.follow:
             last = _follow(pid, t0)
             print("finished" if last.get("ok") else f"ended: {last.get('error')}")
     elif cmd == "detach":
-        print(f"Pigeon is {control.request(pid, 'POST', '/pigeon/stop')['state']}")
+        print(f"Agent is {control.request(pid, 'POST', '/pigeon/stop')['state']}")
     elif cmd == "setup":
         _show(run_browser(c, pid, "setup", dict(url=args.url, extra=args.extra, no_discover=args.no_discover), args.headless))
     elif cmd == "discover":
@@ -339,7 +339,7 @@ def _team_cmd(args, c, get_tid) -> None:
     act = args.action
     if act in ("pull", "publish") or (act == "show" and args.id):
         if not args.id:
-            raise SystemExit(f"which account? loft pigeon team {act} ID")
+            raise SystemExit(f"which account? pigeon agent team {act} ID")
         op = {"pull": "team_pull", "publish": "team_publish", "show": "team_show"}[act]
         _show(run_state(c, args.id, op, dict(force=args.force)))
         return
@@ -355,7 +355,7 @@ def _team_cmd(args, c, get_tid) -> None:
         for r in rows:
             print(f"u/{r['username']:24} profile #{r['profile_id']} {r['profile'] or ''}")
         if not rows:
-            print("no accounts registered yet (they register themselves when the agent runs, or: loft pigeon set ID my_username=NAME)")
+            print("no accounts registered yet (they register themselves when the agent runs, or: pigeon agent set ID my_username=NAME)")
     elif act == "limits":
         names = {"team_dm_per_day": args.dm_per_day, "subreddit_dm_per_day": args.sub_dm_per_day, "team_comment_per_day": args.comment_per_day,
                  "team_post_per_day": args.post_per_day, "subreddit_post_per_day": args.sub_post_per_day}
@@ -420,7 +420,7 @@ def _run_all(args, c, get_tid) -> None:
 
 
 def _accounts_cmd(args, c, get_tid) -> None:
-    """Every Reddit account is its own Loft profile with its own fingerprint and ONE proxy of its own, stored encrypted with the team.
+    """Every Reddit account is its own Pigeon profile with its own fingerprint and ONE proxy of its own, stored encrypted with the team.
     Whoever can run an account runs it through that proxy, so nobody sets proxies up per person."""
     from ..cli import read_proxies
     from ..engine import bulk_create, check_proxy, expand_proxy_placeholders, host_os
@@ -465,9 +465,9 @@ def _accounts_cmd(args, c, get_tid) -> None:
         for p in made:
             print(f"  #{p['id']:<4} {p['name']}")
         print(f"created {len(made)} accounts, each bound to its own proxy and shared with the team.\n"
-              f"  one account:   loft pigeon run {made[0]['id']} --mode full        (or `loft run {made[0]['id']}` then `loft pigeon attach {made[0]['id']}`)\n"
-              f"  all of them:   loft pigeon run-all --tag {(args.tag or ['reddit'])[0]} --mode full      (one browser at a time, in turn)\n"
-              "  first, log each in to Reddit once by hand (`loft run ID`), then `loft pigeon doctor ID`.")
+              f"  one account:   pigeon agent run {made[0]['id']} --mode full        (or `pigeon run {made[0]['id']}` then `pigeon agent attach {made[0]['id']}`)\n"
+              f"  all of them:   pigeon agent run-all --tag {(args.tag or ['reddit'])[0]} --mode full      (one browser at a time, in turn)\n"
+              "  first, log each in to Reddit once by hand (`pigeon run ID`), then `pigeon agent doctor ID`.")
         return
 
     profs = [p for p in c.profiles(tid) if not args.tag or set(args.tag) & set(p["tags"])]

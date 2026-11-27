@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-CHROMIUM = os.environ.get("LOFT_TEST_CHROMIUM")
-pytestmark = pytest.mark.skipif(not CHROMIUM, reason="set LOFT_TEST_CHROMIUM=/path/to/chrome to run the UI smoke test")
+CHROMIUM = os.environ.get("PIGEON_TEST_CHROMIUM")
+pytestmark = pytest.mark.skipif(not CHROMIUM, reason="set PIGEON_TEST_CHROMIUM=/path/to/chrome to run the UI smoke test")
 
-UI = (Path(__file__).parent.parent / "loft" / "ui.html").read_text()
+UI = (Path(__file__).parent.parent / "pigeon" / "ui.html").read_text()
 LEAD = dict(username="alice", subreddit="saas", fit=88, status="draft", reason="asks for help", message="Hey alice, quick q?",
             post_url="/r/saas/comments/p1/t1/", post_title="t", snippet="s", intent="asking", source="browse", created_at=1.0, error=None)
 STATUS = dict(state="idle", job=None, mode=None, since=None, last=None, error=None, central=True, product="Acme",
@@ -66,11 +66,11 @@ def test_panel_renders_every_tab_and_sends_the_right_calls():
                 out = {}
             route.fulfill(content_type="application/json", body=json.dumps(out))
 
-        page.route("http://loft.test/api/**", api)
-        page.route("http://loft.test/", lambda r: r.fulfill(content_type="text/html", body=UI))
-        page.goto("http://loft.test/")
-        page.wait_for_selector("button:text-is('Pigeon controls')")
-        page.click("button:text-is('Pigeon controls')")
+        page.route("http://pigeon.test/api/**", api)
+        page.route("http://pigeon.test/", lambda r: r.fulfill(content_type="text/html", body=UI))
+        page.goto("http://pigeon.test/")
+        page.wait_for_selector("button:text-is('Agent controls')")
+        page.click("button:text-is('Agent controls')")
         page.wait_for_selector("#pg h3")
 
         def text():

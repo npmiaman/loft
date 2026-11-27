@@ -79,7 +79,7 @@ export function Run() {
   const doctor = pg.st?.last?.kind === "doctor" ? pg.st.last.out : null;
   return (
     <div>
-      <Section title="Start Pigeon" hint="It works in its own tab. Your tabs are left alone. Messages and comments go through the daily cap and the team's shared history.">
+      <Section title="Start the agent" hint="It works in its own tab. Your tabs are left alone. Messages and comments go through the daily cap and the team's shared history.">
         <div className="flex flex-wrap items-center gap-2">
           <Select id="pgmode" value={mode} onChange={(e) => setMode(e.target.value)} className="w-64">
             <option value="find">Find people (sends nothing)</option><option value="dm">Send approved messages</option><option value="full">Find people + message them</option>
@@ -95,7 +95,7 @@ export function Run() {
       <Section title="Replies" hint="Look for answers to messages already sent.">
         <Button disabled={pg.busy} onClick={() => pg.run(() => pg.job("replies"), "checking…")}>Check replies</Button>
       </Section>
-      <Section title="Check that Reddit works with Pigeon" hint="Safe: it only looks, it sends nothing. Run it once on a new account.">
+      <Section title="Check that Reddit works with the agent" hint="Safe: it only looks, it sends nothing. Run it once on a new account.">
         <Button disabled={pg.busy} onClick={() => pg.run(() => pg.job("doctor"), "checking Reddit… (the report appears here)")}>Run the check</Button>
         {doctor && <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-hover/60 p-3 font-mono text-xs">{doctor}</pre>}
       </Section>
@@ -122,7 +122,7 @@ export function Comments() {
             <Button size="sm" onClick={() => pg.run(() => pg.op("opp_skip", { id: o.id }))}>Skip</Button></div>}
         </Card>
       ))}
-      {!O.length && empty("None yet. They're drafted while Pigeon looks through your subreddits.")}
+      {!O.length && empty("None yet. They're drafted while the agent looks through your subreddits.")}
       <h4 className="mb-2 mt-6 text-[13px] font-semibold">Post ideas</h4>
       <Button size="sm" onClick={() => pg.run(() => pg.op("ideas_generate"), "writing ideas…")}>Generate 5 post ideas</Button>
       {I.map((i) => (
@@ -183,7 +183,7 @@ export function Product() {
   const [url, setUrl] = React.useState<string | null>(null); const [add, setAdd] = React.useState("");
   return (
     <div>
-      <Section title="What are you promoting?" hint="Pigeon reads your site to learn who to look for.">
+      <Section title="What are you promoting?" hint="The agent reads your site to learn who to look for.">
         <div className="flex gap-2">
           <Input value={url ?? product?.url ?? ""} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-product.com" />
           <Button variant="primary" disabled={pg.busy} onClick={() => pg.run(() => pg.job("setup", { url: url ?? product?.url ?? "" }), "analyzing + finding subreddits…")}>{product ? "Re-analyze" : "Analyze my product"}</Button>
@@ -242,7 +242,7 @@ export function SettingsTab() {
         }}>Save settings</Button>
         <Button onClick={() => pg.run(() => pg.op("settings_set", { restart_warmup: true }), "warm-up restarted from today")}>Restart warm-up from today</Button>
       </div>
-      <p className="mt-3 text-xs text-mute">The DeepSeek key stays on this machine: <code className="rounded bg-hover px-1">loft pigeon config --deepseek-key KEY</code></p>
+      <p className="mt-3 text-xs text-mute">The DeepSeek key stays on this machine: <code className="rounded bg-hover px-1">pigeon agent config --deepseek-key KEY</code></p>
     </div>
   );
 }

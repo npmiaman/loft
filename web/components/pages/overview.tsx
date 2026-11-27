@@ -2,7 +2,7 @@
 import { animate, useMotionValue, useTransform, motion } from "motion/react";
 import * as React from "react";
 import { api } from "@/lib/api";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import type { Overview as O } from "@/lib/types";
 import { Callout, Card, PageHead } from "../ui/bits";
 
@@ -16,7 +16,7 @@ const Stat = ({ k, v, sub }: { k: string; v: React.ReactNode; sub?: string }) =>
 );
 
 export function OverviewPage() {
-  const { canAdmin } = useLoft();
+  const { canAdmin } = usePigeon();
   const [o, setO] = React.useState<O | null>(null); const [err, setErr] = React.useState("");
   React.useEffect(() => { if (canAdmin) api<O>("GET", "/overview").then(setO).catch((e) => setErr(e.message)); }, [canAdmin]);
   if (!canAdmin) return <p className="text-mute">Only owners and admins can see the overview.</p>;

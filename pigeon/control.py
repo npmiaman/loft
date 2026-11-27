@@ -1,6 +1,6 @@
 """A local control channel for a running browser session.
 
-The process that owns a profile's browser (`loft run ID`, or the desktop app's subprocess for it) hosts a tiny
+The process that owns a profile's browser (`pigeon run ID`, or the desktop app's subprocess for it) hosts a tiny
 HTTP server on 127.0.0.1 and writes its port + token to <profiles>/<id>/control.json. Other processes on this
 machine (the CLI, the desktop app) find it there and talk to the live session. Nothing here leaves the machine,
 and the file sits next to the profile data, not inside it, so it never syncs."""
@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
-from .client import LoftError
+from .client import PigeonError
 from .engine import PROFILES
 
 Handler = Callable[[dict], "tuple[int, dict]"]
@@ -39,7 +39,7 @@ class SessionControl:
         class H(BaseHTTPRequestHandler):
             def _serve(self, method: str):
                 u = urlsplit(self.path)
-                if self.headers.get("X-Loft-Control") != outer.token:
+                if self.headers.get("X-Pigeon-Control") != outer.token:
                     return self._send(403, {"detail": "bad control token"})
                 fn = outer.routes.get((method, u.path))
                 if not fn:
@@ -124,18 +124,18 @@ def _info(pid: int, home: Path | None) -> dict | None:
 
 def request(pid: int, method: str, path: str, body: dict | None = None, *, home: Path | None = None,
             timeout: float = 5.0) -> dict:
-    """Call a live session on this machine. Raises LoftError(404) if the profile isn't running here."""
+    """Call a live session on this machine. Raises PigeonError(404) if the profile isn't running here."""
     info = _info(pid, home)
     if not info:
-        raise LoftError(404, f"profile {pid} is not running on this machine (start it with `loft run {pid}`)")
+        raise PigeonError(404, f"profile {pid} is not running on this machine (start it with `pigeon run {pid}`)")
     try:
         r = httpx.request(method, f"http://127.0.0.1:{info['port']}{path}", json=body if method != "GET" else None,
-                          headers={"X-Loft-Control": info["token"]}, timeout=timeout)
+                          headers={"X-Pigeon-Control": info["token"]}, timeout=timeout)
     except httpx.HTTPError as e:
-        raise LoftError(502, f"session {pid} did not answer: {e}")
+        raise PigeonError(502, f"session {pid} did not answer: {e}")
     data = r.json() if r.content else {}
     if not r.is_success:
-        raise LoftError(r.status_code, data.get("detail", r.text))
+        raise PigeonError(r.status_code, data.get("detail", r.text))
     return data
 
 

@@ -5,11 +5,11 @@ import time
 
 import pytest
 
-from loft.client import LoftError
-from loft.pigeon import ops
-from loft.pigeon.agent import Agent, TeamHold
-from loft.pigeon.central import CentralBrain
-from loft.pigeon.state import State
+from pigeon.client import PigeonError
+from pigeon.agent import ops
+from pigeon.agent.agent import Agent, TeamHold
+from pigeon.agent.central import CentralBrain
+from pigeon.agent.state import State
 from tests.conftest import FP
 from tests.test_pigeon import (browser, fast, lead, make_state, mock_context, needs_browser, page)  # noqa: F401
 from tests.test_pigeon_full import _parse, ctx_for
@@ -39,16 +39,16 @@ def test_account_registry_and_validation(team, mk):
     owner.pigeon_set_account(tid, a, "acct_a2")  # re-registering the same profile just updates it
     owner.pigeon_set_account(tid, b, "acct_b")
     assert [(r["profile"], r["username"]) for r in owner.pigeon_accounts(tid)] == [("acct-a", "acct_a2"), ("acct-b", "acct_b")]
-    with pytest.raises(LoftError, match="already registered"):
+    with pytest.raises(PigeonError, match="already registered"):
         owner.pigeon_set_account(tid, b, "acct_a2")  # one Reddit user, one profile
-    with pytest.raises(LoftError, match="username"):
+    with pytest.raises(PigeonError, match="username"):
         owner.pigeon_set_account(tid, b, "no spaces!")
-    with pytest.raises(LoftError, match="profile not found"):
+    with pytest.raises(PigeonError, match="profile not found"):
         member.pigeon_set_account(tid, a, "someone_else")  # no access to that profile
     member.pigeon_set_account(tid, mine, "members_user")  # but their own is fine
     outsider = mk()
     outsider.register("x@x.io", "password1", invite=owner.invite(owner.create_team("Other")["id"])["code"])
-    with pytest.raises(LoftError):
+    with pytest.raises(PigeonError):
         outsider.pigeon_accounts(tid)
 
 
@@ -81,12 +81,12 @@ def test_team_config_is_versioned_and_admin_only(team):
     owner, member, tid, *_ = team
     assert owner.pigeon_config(tid) == dict(version=0, setup=None, unreadable=False, limits={}, updated=0.0)
     assert owner.pigeon_put_config(tid, 0, setup={"product": {"name": "Acme"}})["version"] == 1
-    with pytest.raises(LoftError, match="newer setup"):
+    with pytest.raises(PigeonError, match="newer setup"):
         owner.pigeon_put_config(tid, 0, setup={"product": {"name": "Stale"}})  # based on an old version
-    with pytest.raises(LoftError, match="needs role"):
+    with pytest.raises(PigeonError, match="needs role"):
         member.pigeon_put_config(tid, 1, setup={"x": 1})
     assert member.pigeon_config(tid)["setup"]["product"]["name"] == "Acme"  # anyone on the team (who holds its key) can read it
-    with pytest.raises(LoftError, match="too large"):
+    with pytest.raises(PigeonError, match="too large"):
         owner.pigeon_put_config(tid, 1, setup={"blob": "x" * 400_000})
 
 
@@ -105,7 +105,7 @@ def test_the_shared_setup_is_ciphertext_on_the_server_but_limits_are_plain(team)
 
 def test_a_team_key_rotation_carries_the_shared_setup_along(team):
     """Upstream's rotation re-encrypts everything; the shared setup must come through it readable by the remaining members."""
-    from loft.client import rotate_team_key
+    from pigeon.client import rotate_team_key
     owner, member, tid, *_ = team
     owner.pigeon_put_config(tid, 0, setup={"product": {"name": "Acme"}})
     before = owner.j("GET", f"/teams/{tid}/pigeon/config")["setup"]
@@ -293,7 +293,7 @@ class FakeBridge:
 
 
 def agent_for(tmp_path, owner, tid, pid, name="x", bridge=None, llm=True, **settings):
-    from loft.pigeon.llm import Llm
+    from pigeon.agent.llm import Llm
     from tests.test_pigeon import fake_deepseek
     st = make_state(tmp_path / name, **settings)
     return Agent(bridge or FakeBridge(), st, Llm("k", transport=fake_deepseek()) if llm else None, CentralBrain(owner, tid, pid))
@@ -361,7 +361,7 @@ def test_replies_are_recorded_for_the_team(team, tmp_path):
 
 
 def test_reply_detection_in_the_chat_list():
-    from loft.pigeon.agent import room_replied
+    from pigeon.agent.agent import room_replied
     lead_ = dict(username="alice", message="Hey alice, saw your post about onboarding. How do you handle it today?")
     cases = [
         ("alice\nthanks, I'll take a look\n3m", False, True),                  # they spoke last, read
@@ -443,7 +443,7 @@ def test_team_dm_limit_stops_dms_and_subreddit_limit_parks_only_that_sub(team, t
 
 # ------------------------------------------------------------------ the CLI
 def test_cli_team_commands(team, capsys, tmp_path):
-    from loft.pigeon.cli import handle
+    from pigeon.agent.cli import handle
     owner, member, tid, a, b, mine = team
     run = lambda who, *argv: (handle(_parse(list(argv)), who, lambda: tid), capsys.readouterr().out)[1]
 
@@ -474,7 +474,7 @@ def test_new_account_inherits_team_setup_registers_itself_and_queues_leads(page,
     owner, _, tid, a, b, _ = team
     ops.run_state_op(ctx_for(tmp_path / "src", brain=CentralBrain(owner, tid, a)), "team_publish")  # an admin shares a setup
 
-    from loft.pigeon.bridge import Bridge
+    from pigeon.agent.bridge import Bridge
     ag = agent_for(tmp_path, owner, tid, b, "new", Bridge(page, pace=2), my_username="", min_fit=70)
     ag.st.product, ag.st.subreddits = None, []  # brand new: nothing set up on this account
     ag.st.subreddits = []
@@ -494,7 +494,7 @@ def test_subreddit_cap_parks_only_that_subreddits_leads(page, tmp_path, fast, te
     set_limits(owner, tid, subreddit_dm_per_day=1)
     CentralBrain(owner, tid, b).claim("dm", "earlier_person", subreddit="saas")  # r/saas is at its cap for the team
 
-    from loft.pigeon.bridge import Bridge
+    from pigeon.agent.bridge import Bridge
     ag = agent_for(tmp_path, owner, tid, a, "a", Bridge(page, pace=2), llm=False)
     ag.st.put_lead(dict(lead("carol"), fit=95))                       # r/saas: capped, parked
     ag.st.put_lead(dict(lead("alex_dev"), subreddit="startups", fit=80))  # another subreddit: goes out
@@ -508,7 +508,7 @@ def test_subreddit_cap_parks_only_that_subreddits_leads(page, tmp_path, fast, te
 # ------------------------------------------------------------------ replies and post submission, end to end in a browser
 @needs_browser
 def test_reply_detection_against_a_real_chat_page_and_inbox(page, tmp_path, team):
-    from loft.pigeon.bridge import Bridge
+    from pigeon.agent.bridge import Bridge
     owner, _, tid, a, b, _ = team
     ag = agent_for(tmp_path, owner, tid, a, "a", Bridge(page, pace=2))
     for name in ("alice", "bob", "carol", "dave", "erin", "frank"):
@@ -524,7 +524,7 @@ def test_reply_detection_against_a_real_chat_page_and_inbox(page, tmp_path, team
 
 @needs_browser
 def test_agent_submits_a_post_and_the_team_records_it(page, tmp_path, team):
-    from loft.pigeon.bridge import Bridge
+    from pigeon.agent.bridge import Bridge
     owner, _, tid, a, b, _ = team
     ag = agent_for(tmp_path, owner, tid, a, "a", Bridge(page, pace=2))
     ag.st.post_ideas = [dict(id="i1", subreddit="saas", title="What I learned finding my first ten customers", body="We tried cold DMs first.\nThen we went where buyers already complain.", angle="a"),
@@ -545,7 +545,7 @@ def test_agent_submits_a_post_and_the_team_records_it(page, tmp_path, team):
 
 @needs_browser
 def test_a_rejected_post_is_reported_and_releases_the_claim(page, tmp_path, team):
-    from loft.pigeon.bridge import Bridge
+    from pigeon.agent.bridge import Bridge
     owner, _, tid, a, b, _ = team
     ag = agent_for(tmp_path, owner, tid, a, "a", Bridge(page, pace=2))
     ag.st.post_ideas = [dict(id="f1", subreddit="flairsub", title="Needs a flair", body="body", angle="a")]
@@ -588,7 +588,7 @@ def test_submit_is_guarded(team, tmp_path):
 
 
 def test_posts_are_a_team_limit_flag_on_the_cli(team, capsys):
-    from loft.pigeon.cli import handle
+    from pigeon.agent.cli import handle
     owner, _, tid, *_ = team
     handle(_parse(["team", "limits", "--post-per-day", "2", "--sub-post-per-day", "1"]), owner, lambda: tid)
     out = capsys.readouterr().out

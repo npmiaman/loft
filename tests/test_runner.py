@@ -8,9 +8,9 @@ import pytest
 import uvicorn
 from websockets.sync.client import connect
 
-from loft.client import Client, LoftError
-from loft.engine import new_fingerprint
-from loft.runner import create_runner, start_cloud_session
+from pigeon.client import Client, PigeonError
+from pigeon.engine import new_fingerprint
+from pigeon.runner import create_runner, start_cloud_session
 from tests.conftest import _free_port
 from tests.test_browser import HAVE
 
@@ -69,7 +69,7 @@ def test_cloud_session_streams_and_syncs(server, runner, site):
     tid = owner.create_team("T")["id"]
     pid = owner.create_profile(tid, name="cloud", fingerprint=new_fingerprint("windows"), start_url=site)["id"]
 
-    with pytest.raises(LoftError, match="bad runner key"):
+    with pytest.raises(PigeonError, match="bad runner key"):
         start_cloud_session(owner, pid, dict(runner, secret="wrong"))
     s = start_cloud_session(owner, pid, runner)
     sess = runner["app"].state.sessions[s["id"]]
@@ -108,7 +108,7 @@ def test_cloud_session_streams_and_syncs(server, runner, site):
     assert p["version"] == 1 and p["running"] is None
 
     # the typed text was synced: check it from a fresh local launch
-    from loft.engine import run_profile
+    from pigeon.engine import run_profile
     seen = {}
 
     def chk(ctx):
@@ -116,5 +116,5 @@ def test_cloud_session_streams_and_syncs(server, runner, site):
         pg.goto(site)
         seen["typed"] = pg.evaluate("() => localStorage.getItem('typed')")
 
-    run_profile(owner, pid, headless=True, session=chk, home=home.parent / "verify-loft", log=lambda m: None)
+    run_profile(owner, pid, headless=True, session=chk, home=home.parent / "verify-pigeon", log=lambda m: None)
     assert seen["typed"] == "hello cloud"

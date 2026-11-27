@@ -1,11 +1,11 @@
-"""`loft pigeon doctor` and failure snapshots: how a Reddit markup change shows up, on mock pages (healthy and deliberately broken)."""
+"""`pigeon agent doctor` and failure snapshots: how a Reddit markup change shows up, on mock pages (healthy and deliberately broken)."""
 import time
 
 import pytest
 
-from loft.pigeon import ops
-from loft.pigeon.agent import Agent
-from loft.pigeon.bridge import Bridge
+from pigeon.agent import ops
+from pigeon.agent.agent import Agent
+from pigeon.agent.bridge import Bridge
 from tests.test_pigeon import browser, fast, lead, make_state, needs_browser, page  # noqa: F401
 
 
@@ -72,5 +72,5 @@ def test_snapshots_are_pruned(page, tmp_path):
 
 
 def test_agent_without_a_diag_dir_just_skips_snapshots():
-    ag = Agent(None, make_state(__import__("pathlib").Path("/tmp/loft-diag-test")), None, None)
+    ag = Agent(None, make_state(__import__("pathlib").Path("/tmp/pigeon-diag-test")), None, None)
     ag.snap("anything")  # no directory, no bridge: must not raise

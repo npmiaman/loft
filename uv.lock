@@ -1006,76 +1006,6 @@ wheels = [
 ]
 
 [[package]]
-name = "loft"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "cryptography" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "uvicorn" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-build = [
-    { name = "pyinstaller" },
-]
-client = [
-    { name = "camoufox", extra = ["geoip"] },
-    { name = "socksio" },
-]
-desktop = [
-    { name = "camoufox", extra = ["geoip"] },
-    { name = "pywebview" },
-    { name = "socksio" },
-]
-server = [
-    { name = "boto3" },
-    { name = "psycopg", extra = ["binary"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "boto3" },
-    { name = "camoufox", extra = ["geoip"] },
-    { name = "moto", extra = ["server"] },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pytest" },
-    { name = "pywebview" },
-    { name = "socksio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", marker = "extra == 'server'", specifier = ">=1.44.12" },
-    { name = "camoufox", extras = ["geoip"], marker = "extra == 'client'", specifier = ">=0.5.9" },
-    { name = "camoufox", extras = ["geoip"], marker = "extra == 'desktop'", specifier = ">=0.5.9" },
-    { name = "cryptography", specifier = ">=50.0.2" },
-    { name = "fastapi", specifier = ">=0.165.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'server'", specifier = ">=3.3.9" },
-    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6" },
-    { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=5" },
-    { name = "socksio", marker = "extra == 'client'", specifier = ">=1.0.0" },
-    { name = "socksio", marker = "extra == 'desktop'", specifier = ">=1.0.0" },
-    { name = "uvicorn", specifier = ">=0.54.0" },
-    { name = "websockets", specifier = ">=17.4" },
-]
-provides-extras = ["client", "server", "desktop", "build"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "boto3", specifier = ">=1.44.12" },
-    { name = "camoufox", extras = ["geoip"], specifier = ">=0.5.9" },
-    { name = "moto", extras = ["server"], specifier = ">=5.2.6" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9" },
-    { name = "pytest", specifier = ">=9.2.0" },
-    { name = "pywebview", specifier = ">=5" },
-    { name = "socksio", specifier = ">=1.0.0" },
-]
-
-[[package]]
 name = "macholib"
 version = "1.16.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1551,6 +1481,76 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/03/4f/2750f7f6f025a1507cd3b7218691671eecfd0bbebebe8b39aa0fe1d360b8/pefile-2024.8.26.tar.gz", hash = "sha256:3ff6c5d8b43e8c37bb6e6dd5085658d658a7a0bdcd20b6a07b1fcfc1c4e9d632", size = 76008, upload-time = "2024-08-26T20:58:38.155Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/16/12b82f791c7f50ddec566873d5bdd245baa1491bac11d15ffb98aecc8f8b/pefile-2024.8.26-py3-none-any.whl", hash = "sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f", size = 74766, upload-time = "2024-08-26T21:01:02.632Z" },
+]
+
+[[package]]
+name = "pigeon"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+build = [
+    { name = "pyinstaller" },
+]
+client = [
+    { name = "camoufox", extra = ["geoip"] },
+    { name = "socksio" },
+]
+desktop = [
+    { name = "camoufox", extra = ["geoip"] },
+    { name = "pywebview" },
+    { name = "socksio" },
+]
+server = [
+    { name = "boto3" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "boto3" },
+    { name = "camoufox", extra = ["geoip"] },
+    { name = "moto", extra = ["server"] },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pytest" },
+    { name = "pywebview" },
+    { name = "socksio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", marker = "extra == 'server'", specifier = ">=1.44.12" },
+    { name = "camoufox", extras = ["geoip"], marker = "extra == 'client'", specifier = ">=0.5.9" },
+    { name = "camoufox", extras = ["geoip"], marker = "extra == 'desktop'", specifier = ">=0.5.9" },
+    { name = "cryptography", specifier = ">=50.0.2" },
+    { name = "fastapi", specifier = ">=0.165.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'server'", specifier = ">=3.3.9" },
+    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6" },
+    { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=5" },
+    { name = "socksio", marker = "extra == 'client'", specifier = ">=1.0.0" },
+    { name = "socksio", marker = "extra == 'desktop'", specifier = ">=1.0.0" },
+    { name = "uvicorn", specifier = ">=0.54.0" },
+    { name = "websockets", specifier = ">=17.4" },
+]
+provides-extras = ["client", "server", "desktop", "build"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "boto3", specifier = ">=1.44.12" },
+    { name = "camoufox", extras = ["geoip"], specifier = ">=0.5.9" },
+    { name = "moto", extras = ["server"], specifier = ">=5.2.6" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9" },
+    { name = "pytest", specifier = ">=9.2.0" },
+    { name = "pywebview", specifier = ">=5" },
+    { name = "socksio", specifier = ">=1.0.0" },
 ]
 
 [[package]]

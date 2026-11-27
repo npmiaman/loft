@@ -4,7 +4,7 @@ import { GeistSans } from "geist/font/sans";
 import { Toaster } from "sonner";
 import "./globals.css";
 
-export const metadata: Metadata = { title: "Loft", description: "Team browser profiles with Pigeon" };
+export const metadata: Metadata = { title: "Pigeon", description: "Team browser accounts, with a Reddit outreach agent" };
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

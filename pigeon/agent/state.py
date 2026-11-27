@@ -1,7 +1,7 @@
 """Per-profile Pigeon state: one JSON file inside the profile's data dir, so it syncs with the profile.
 
 That means the daily cap, warm-up clock, leads and pauses belong to the Reddit *account* and follow it
-between teammates. The DeepSeek key is the exception: it stays in ~/.loft/pigeon.json and never syncs."""
+between teammates. The DeepSeek key is the exception: it stays in ~/.pigeon-app/pigeon.json and never syncs."""
 from __future__ import annotations
 
 import json

@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from loft import engine
-from loft.pigeon.runner import with_agent
+from pigeon import engine
+from pigeon.agent.runner import with_agent
 from tests.conftest import FP
 from tests.test_pigeon import HAVE
 

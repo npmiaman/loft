@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from loft.client import Client
-from loft.server import create_app
+from pigeon.client import Client
+from pigeon.server import create_app
 
 PG_BIN = next((Path(p) for p in ("/opt/homebrew/opt/postgresql@17/bin", "/opt/homebrew/opt/postgresql@16/bin",
                                  "/usr/lib/postgresql/16/bin", "/usr/lib/postgresql/17/bin")
@@ -35,13 +35,13 @@ def pg_cluster(tmp_path_factory):
     d = tmp_path_factory.mktemp("pg")
     port = _free_port()
     env = dict(os.environ, LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8")  # postmaster refuses to start without it
-    subprocess.run([PG_BIN / "initdb", "-D", d / "data", "-U", "loft", "--auth=trust", "-E", "UTF8"],
+    subprocess.run([PG_BIN / "initdb", "-D", d / "data", "-U", "pigeon", "--auth=trust", "-E", "UTF8"],
                    check=True, capture_output=True, env=env)
     import tempfile
     sock = tempfile.mkdtemp(prefix="lpg", dir="/tmp")  # Unix socket paths must stay under ~103 bytes
     subprocess.run([PG_BIN / "pg_ctl", "-D", d / "data", "-l", d / "log", "-w", "-o",
                     f"-p {port} -k {sock} -c listen_addresses=127.0.0.1", "start"], check=True, capture_output=True, env=env)
-    yield f"postgresql://loft@127.0.0.1:{port}"
+    yield f"postgresql://pigeon@127.0.0.1:{port}"
     subprocess.run([PG_BIN / "pg_ctl", "-D", d / "data", "-m", "immediate", "stop"], capture_output=True)
     shutil.rmtree(sock, ignore_errors=True)
 
@@ -75,14 +75,14 @@ def server(tmp_path, request, monkeypatch):
         import psycopg
         base = request.getfixturevalue("pg_cluster")
         s3 = request.getfixturevalue("s3_endpoint")
-        name = f"loft_{os.getpid()}_{next(_n)}"
+        name = f"pigeon_{os.getpid()}_{next(_n)}"
         with psycopg.connect(base + "/postgres", autocommit=True) as c:
             c.execute(f"CREATE DATABASE {name}")
         for k, v in {"AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test", "AWS_DEFAULT_REGION": "us-east-1",
-                     "LOFT_S3_ENDPOINT": s3}.items():
+                     "PIGEON_S3_ENDPOINT": s3}.items():
             monkeypatch.setenv(k, v)
         boto3.client("s3", endpoint_url=s3).create_bucket(Bucket=name.replace("_", "-"))
-        kw = {"db_url": f"{base}/{name}", "blobs_url": f"s3://{name.replace('_', '-')}/loft"}
+        kw = {"db_url": f"{base}/{name}", "blobs_url": f"s3://{name.replace('_', '-')}/pigeon"}
     port = _free_port()
     app = create_app(tmp_path / "srv", open_signup=False, **kw)
     srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))

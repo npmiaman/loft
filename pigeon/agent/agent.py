@@ -57,7 +57,7 @@ class Agent:
 
     def _need_llm(self) -> Llm:
         if not self.llm:
-            raise RuntimeError("No DeepSeek key: `loft pigeon config --deepseek-key KEY` or set DEEPSEEK_API_KEY.")
+            raise RuntimeError("No DeepSeek key: `pigeon agent config --deepseek-key KEY` or set DEEPSEEK_API_KEY.")
         return self.llm
 
     def snap(self, label: str) -> None:
@@ -272,7 +272,7 @@ class Agent:
             raise _Outcome()
         if code == "captcha":
             governor.pause_for(self.st, 24 * 3600)
-            self.st.log("warn", "Captcha shown. Paused for 24h — solve it by hand in this profile (`loft run ID`), then resume.")
+            self.st.log("warn", "Captcha shown. Paused for 24h — solve it by hand in this profile (`pigeon run ID`), then resume.")
             raise _Outcome()
         if code != "blocked":
             self.fails += 1
@@ -329,7 +329,7 @@ class Agent:
                     self.st.save()
                     self.st.log("info", f"Logged in as u/{name}")
             except Exception:
-                self.st.log("warn", "Couldn't tell which Reddit user this is (not logged in?). Set it: `loft pigeon set ID my_username=NAME`.")
+                self.st.log("warn", "Couldn't tell which Reddit user this is (not logged in?). Set it: `pigeon agent set ID my_username=NAME`.")
         if self.central and self.s["my_username"]:
             err = self.central.register_account(self.s["my_username"])
             if err:
@@ -340,9 +340,9 @@ class Agent:
         s = self.s
         if mode != "dm":
             if not self.st.product:
-                raise RuntimeError("Set up the product first: `loft pigeon setup ID URL`.")
+                raise RuntimeError("Set up the product first: `pigeon agent setup ID URL`.")
             if not any(x["enabled"] for x in self.st.subreddits):
-                raise RuntimeError("No subreddits enabled. Run `loft pigeon setup ID URL` or enable some with `loft pigeon set`.")
+                raise RuntimeError("No subreddits enabled. Run `pigeon agent setup ID URL` or enable some with `pigeon agent set`.")
         if s["warmup"] and not s["warmup_start"]:
             s["warmup_start"] = time.time()
             self.st.save()
@@ -538,7 +538,7 @@ class Agent:
         Success is judged by Reddit redirecting to the new thread, never by the click. Returns the post's URL."""
         i = next((x for x in self.st.post_ideas if x["id"] == iid), None)
         if not i:
-            raise RuntimeError("post idea not found (see `loft pigeon ideas ID`)")
+            raise RuntimeError("post idea not found (see `pigeon agent ideas ID`)")
         sub = i["subreddit"]
         meta = next((x for x in self.st.subreddits if x["name"].lower() == sub.lower()), None)
         if meta and meta["rules_risk"] == "high" and not force:
@@ -597,7 +597,7 @@ class Agent:
 
     # ---------------------------------------------------------------- doctor
     HINTS = {
-        "logged in": "this profile isn't logged in to Reddit: open it with `loft run ID`, log in, close it",
+        "logged in": "this profile isn't logged in to Reddit: open it with `pigeon run ID`, log in, close it",
         "post elements": "no posts found: logged out, a wall or captcha, or Reddit changed its feed markup",
         "posts parse": "posts were found but not parsed: the shreddit-post attributes (author, post-title, permalink) changed",
         "upvote button": "no visible upvote button: upvoting would skip silently",

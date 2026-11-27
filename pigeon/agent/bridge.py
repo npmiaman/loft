@@ -9,7 +9,7 @@ import uuid
 from importlib import resources
 from typing import Any
 
-ASSETS = resources.files("loft.pigeon") / "assets"
+ASSETS = resources.files("pigeon.agent") / "assets"
 
 
 class Stop(Exception):

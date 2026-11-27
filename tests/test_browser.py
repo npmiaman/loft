@@ -7,8 +7,8 @@ import threading
 
 import pytest
 
-from loft.client import Client, LoftError
-from loft.engine import (export_bundle, export_cookies, host_os, import_bundle, import_cookies, new_fingerprint,
+from pigeon.client import Client, PigeonError
+from pigeon.engine import (export_bundle, export_cookies, host_os, import_bundle, import_cookies, new_fingerprint,
                          open_profile, parse_cookies, run_profile)
 
 try:
@@ -27,7 +27,7 @@ PROBE = """() => ({ua: navigator.userAgent, platform: navigator.platform, cores:
   fonts: ['Arial','Helvetica Neue','Segoe UI','Calibri','Ubuntu'].map(f => document.fonts.check('12px "' + f + '"')).join(''),
   webdriver: navigator.webdriver})"""
 CANVAS = """() => { const c = document.createElement('canvas'); const x = c.getContext('2d'); x.font = '16px Arial';
-  x.fillText('loft fp 123', 2, 20); return c.toDataURL().slice(-40) }"""
+  x.fillText('pigeon fp 123', 2, 20); return c.toDataURL().slice(-40) }"""
 QUIET = dict(log=lambda m: None)
 
 
@@ -38,7 +38,7 @@ def site():
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(b"<html><body>loft test</body></html>")
+            self.wfile.write(b"<html><body>pigeon test</body></html>")
 
         def log_message(self, *a):
             pass
@@ -125,7 +125,7 @@ def test_real_canvas_is_stable_but_needs_host_os(team, tmp_path, site):
     assert got[0] == got[1] and got[2] == got[3]
     other = "windows" if host != "windows" else "macos"
     bad = owner.create_profile(tid, name="bad", os=other, canvas="real", fingerprint=new_fingerprint(other))["id"]
-    with pytest.raises(LoftError, match="canvas 'real'"):
+    with pytest.raises(PigeonError, match="canvas 'real'"):
         run_profile(owner, bad, headless=True, session=s, home=tmp_path / "A", **QUIET)
     assert owner.profile(bad)["running"] is None  # lock released after the refusal
 
@@ -164,7 +164,7 @@ def test_bundle_roundtrip_with_passphrase(team, tmp_path, site):
     run_profile(owner, p, headless=True, session=s, home=tmp_path, **QUIET)
     blob = export_bundle(owner, p, passphrase="correct horse")
     assert b"bundle" not in blob
-    with pytest.raises(LoftError, match="wrong passphrase"):
+    with pytest.raises(PigeonError, match="wrong passphrase"):
         import_bundle(owner, tid, blob, passphrase="nope")
     q = import_bundle(owner, tid, blob, passphrase="correct horse", name="copy")
     assert q["name"] == "copy" and q["version"] == 1 and q["tags"] == ["x"]
@@ -196,7 +196,7 @@ def test_native_profile_shows_host_fonts_camoufox_would_hide():
     """Pixelscan flagged 'Masking detected' because Camoufox hid installed system fonts (osFontsStatus=false)."""
     import json
     from importlib.resources import files
-    from loft.engine import default_canvas, host_font_families, native_fonts
+    from pigeon.engine import default_canvas, host_font_families, native_fonts
     host = host_os()
     key = {"macos": "mac", "windows": "win", "linux": "lin"}[host]
     essential = set(json.loads((files("camoufox") / "essential-fonts.json").read_text(encoding="utf-8"))[key])
@@ -217,7 +217,7 @@ def test_real_canvas_is_actually_stable_across_launches(tmp_path):
     (a different value every launch) unless it is switched off, so this launches one profile three times on a real http origin."""
     import http.server
     import threading
-    from loft.engine import camoufox_options, host_os, new_fingerprint
+    from pigeon.engine import camoufox_options, host_os, new_fingerprint
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -231,7 +231,7 @@ def test_real_canvas_is_actually_stable_across_launches(tmp_path):
 
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    js = "() => { const c=document.createElement('canvas'); const x=c.getContext('2d'); x.font='16px Arial'; x.fillText('loft canvas 123', 2, 20); return c.toDataURL().slice(-48) }"
+    js = "() => { const c=document.createElement('canvas'); const x=c.getContext('2d'); x.font='16px Arial'; x.fillText('pigeon canvas 123', 2, 20); return c.toDataURL().slice(-48) }"
     from camoufox.sync_api import Camoufox
     fp = new_fingerprint(host_os())
     seen = []

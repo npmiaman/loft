@@ -4,7 +4,7 @@
   * the central brain across accounts: no double DMs, no double comments, context in prompts, fail-closed when unreachable
   * one live browser session driven through its control channel, using every feature end to end
 
-Browser parts run on a Chromium context against Pigeon's mock of Reddit (LOFT_TEST_CHROMIUM) or Camoufox if installed."""
+Browser parts run on a Chromium context against Pigeon's mock of Reddit (PIGEON_TEST_CHROMIUM) or Camoufox if installed."""
 import json
 import threading
 import time
@@ -12,18 +12,18 @@ import time
 import httpx
 import pytest
 
-from loft.client import LoftError
+from pigeon.client import PigeonError
 
-from loft import control
-from loft.pigeon import brain as brain_mod
-from loft.pigeon import ops
-from loft.pigeon.agent import Agent
-from loft.pigeon.bridge import Bridge, Stop
-from loft.pigeon.central import CentralBrain
-from loft.pigeon.llm import Llm
-from loft.pigeon.runner import state_path
-from loft.pigeon.state import State
-from loft.session import interactive
+from pigeon import control
+from pigeon.agent import brain as brain_mod
+from pigeon.agent import ops
+from pigeon.agent.agent import Agent
+from pigeon.agent.bridge import Bridge, Stop
+from pigeon.agent.central import CentralBrain
+from pigeon.agent.llm import Llm
+from pigeon.agent.runner import state_path
+from pigeon.agent.state import State
+from pigeon.session import interactive
 from tests.conftest import FP
 from tests.test_pigeon import (browser, fake_deepseek, fast, host_for, lead, make_state, mock_context, needs_browser,  # noqa: F401
                                serve_session_thread,
@@ -332,14 +332,14 @@ def test_every_feature_inside_one_live_session(mock_context, tmp_path, fast, tea
 # ------------------------------------------------------------------ the CLI: routing and output
 def _parse(argv):
     import argparse
-    from loft.pigeon.cli import register
+    from pigeon.agent.cli import register
     ap = argparse.ArgumentParser()
     register(ap.add_subparsers(dest="cmd", required=True))
     return ap.parse_args(["pigeon", *argv])
 
 
 def test_cli_brain_output(team, capsys):
-    from loft.pigeon.cli import handle
+    from pigeon.agent.cli import handle
     owner, tid, a, b = team
     ba = CentralBrain(owner, tid, a)
     ba.finish(ba.claim("dm", "alice", subreddit="saas"), "done")
@@ -362,8 +362,8 @@ def test_cli_brain_output(team, capsys):
 
 
 def test_cli_commands_route_to_the_live_session(tmp_path, monkeypatch, capsys):
-    import loft.control as ctl_mod
-    from loft.pigeon.cli import handle
+    import pigeon.control as ctl_mod
+    from pigeon.agent.cli import handle
     monkeypatch.setattr(ctl_mod, "PROFILES", tmp_path)
     seed_state(tmp_path, 3, dm_mode="template")
     host = host_for(tmp_path, 3)(3, tmp_path)
@@ -385,8 +385,8 @@ def test_cli_commands_route_to_the_live_session(tmp_path, monkeypatch, capsys):
         with pytest.raises(SystemExit, match="already open"):
             run("run", "3")
         assert "attached" in run("attach", "3", "--mode", "find")
-        assert "already running" in str(pytest.raises(LoftError, handle, _parse(["attach", "3"]), None).value)  # one agent per session
-        assert run("detach", "3") == "Pigeon is idle\n"  # it was still queued, so detaching just drops it
+        assert "already running" in str(pytest.raises(PigeonError, handle, _parse(["attach", "3"]), None).value)  # one agent per session
+        assert run("detach", "3") == "Agent is idle\n"  # it was still queued, so detaching just drops it
     finally:
         stop.set()
         ctl.close()

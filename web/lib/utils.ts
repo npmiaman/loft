@@ -13,10 +13,10 @@ const JOB_WORDS: Record<string, string> = {
   post: "posting a comment", submit: "posting", setup: "reading your product", discover: "finding subreddits",
 };
 export function pigeonWords(pg: { state: string; job: string | null; mode: string | null }) {
-  if (pg.state === "stopping") return "Pigeon is stopping…";
-  if (pg.state === "idle") return "Pigeon is off";
+  if (pg.state === "stopping") return "Agent is stopping…";
+  if (pg.state === "idle") return "Agent is off";
   const w = pg.job === "run" ? MODE_WORDS[pg.mode ?? ""] : JOB_WORDS[pg.job ?? ""];
-  return "Pigeon is " + (w || "working");
+  return "Agent is " + (w || "working");
 }
 export function friendlyError(msg: string) {
   if (/proxy not working/i.test(msg))

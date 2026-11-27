@@ -2,7 +2,7 @@
 import { Activity, LayoutDashboard, LogOut, UserRound, Users } from "lucide-react";
 import * as React from "react";
 import { api } from "@/lib/api";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Select } from "./ui/field";
 
@@ -11,13 +11,13 @@ const ICONS = { accounts: UserRound, team: Users, activity: Activity, overview: 
 const LABEL: Record<Tab, string> = { accounts: "Accounts", team: "Team", activity: "Activity", overview: "Overview" };
 
 export function Shell({ tab, setTab, children }: { tab: Tab; setTab: (t: Tab) => void; children: React.ReactNode }) {
-  const { s, act, canAdmin } = useLoft();
+  const { s, act, canAdmin } = usePigeon();
   const tabs: Tab[] = ["accounts", "team", ...(canAdmin ? (["activity", "overview"] as Tab[]) : [])];
   return (
     <div className="grid min-h-screen grid-cols-1 md:grid-cols-[244px_1fr]">
       <aside className="flex flex-wrap items-center gap-3 border-b border-line bg-side p-3 md:sticky md:top-0 md:h-screen md:flex-col md:items-stretch md:gap-3.5 md:border-b-0 md:border-r md:p-4">
         <div className="flex items-center gap-2.5 px-2 text-[15px] font-semibold tracking-tight">
-          <span className="grid size-[26px] place-items-center rounded-lg bg-ink text-sm font-bold text-on-ink">L</span> Loft
+          <span className="grid size-[26px] place-items-center rounded-lg bg-ink text-sm font-bold text-on-ink">P</span> Pigeon
         </div>
         {s.me && s.me.teams.length > 0 && (
           <Select aria-label="Team" value={s.team} onChange={(e) => act(() => api("POST", "/team/" + e.target.value))} className="max-md:order-last max-md:w-48">

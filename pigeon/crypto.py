@@ -40,7 +40,7 @@ def encrypt(key: bytes, data: bytes, aad: str = "") -> bytes:
 
 def decrypt(key: bytes, blob: bytes, aad: str = "") -> bytes:
     if blob[:4] != MAGIC:
-        raise ValueError("not a Loft ciphertext")
+        raise ValueError("not a Pigeon ciphertext")
     return AESGCM(key).decrypt(blob[4:16], blob[16:], aad.encode())
 
 

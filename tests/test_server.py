@@ -1,7 +1,7 @@
 import pytest
 
-from loft.client import LoftError
-from loft.engine import pack, unpack
+from pigeon.client import PigeonError
+from pigeon.engine import pack, unpack
 from tests.conftest import FP
 
 # Every server test runs twice: SQLite + files, and real Postgres + S3 (moto).
@@ -22,7 +22,7 @@ def team_of_three(mk):
 
 def test_signup_is_invite_only_after_first_user(mk):
     mk().register("a@x.io", "password1")
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         mk().register("b@x.io", "password1")
     assert e.value.status == 403
 
@@ -32,7 +32,7 @@ def test_login_and_bad_password(mk):
     c = mk()
     c.login("A@x.io", "password1")
     assert c.me()["email"] == "a@x.io"
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         mk().login("a@x.io", "nope-nope")
     assert e.value.status == 401
 
@@ -43,14 +43,14 @@ def test_roles_and_visibility(mk):
                              proxy={"server": "http://1.2.3.4:8080", "username": "u", "password": "secret"})
     # member cannot see an unshared profile
     assert member.profiles(tid) == []
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         member.profile(p["id"])
     assert e.value.status == 404
     # share run-only: visible, proxy password hidden, cannot edit
     admin.share(p["id"], ids["mem@x.io"], "run")
     seen = member.profiles(tid)[0]
     assert seen["access"] == "run" and seen["proxy"]["password"] == "secret"  # decrypted client-side
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         member.patch_profile(p["id"], name="hijack")
     assert e.value.status == 403
     # but run access gets full launch info (needed to start the browser)
@@ -61,7 +61,7 @@ def test_roles_and_visibility(mk):
     assert member.patch_profile(p["id"], notes="ok")["notes"] == "ok"
     # members can't invite or read audit
     for call in (lambda: member.invite(tid), lambda: member.audit(tid)):
-        with pytest.raises(LoftError) as e:
+        with pytest.raises(PigeonError) as e:
             call()
         assert e.value.status == 403
 
@@ -81,17 +81,17 @@ def test_outsider_cannot_touch_team(mk):
     outsider.register("out@x.io", "password1", invite=owner.invite(owner.create_team("Other")["id"])["code"])
     for call in (lambda: outsider.profiles(tid), lambda: outsider.profile(p["id"]),
                  lambda: outsider.launch_info(p["id"]), lambda: outsider.download(p["id"])):
-        with pytest.raises(LoftError) as e:
+        with pytest.raises(PigeonError) as e:
             call()
         assert e.value.status == 404
 
 
 def test_last_owner_protected_and_admin_cannot_demote_owner(mk):
     tid, owner, admin, member, ids = team_of_three(mk)
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         admin.set_role(tid, ids["owner@x.io"], "member")
     assert e.value.status == 403
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         owner.set_role(tid, ids["owner@x.io"], "member")
     assert e.value.status == 400
 
@@ -101,7 +101,7 @@ def test_removed_member_loses_shares(mk):
     p = owner.create_profile(tid, name="x", fingerprint=FP)
     owner.share(p["id"], ids["mem@x.io"])
     owner.remove_member(tid, ids["mem@x.io"])
-    with pytest.raises(LoftError):
+    with pytest.raises(PigeonError):
         member.profile(p["id"])
 
 
@@ -111,17 +111,17 @@ def test_run_lock_blocks_second_runner(mk):
     owner.share(p["id"], ids["mem@x.io"])
     lk = owner.lock(p["id"])
     assert owner.profile(p["id"])["running"]["by"] == "Owner"
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         member.lock(p["id"])
     assert e.value.status == 409
     # a member can't force-unlock; an admin can
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         member.unlock(p["id"], force=True)
     assert e.value.status == 403
     admin.unlock(p["id"], force=True)
     member.lock(p["id"])
     # the old holder's token is now dead
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         owner.heartbeat(p["id"], lk["lock"])
     assert e.value.status == 423
 
@@ -131,12 +131,12 @@ def test_sync_requires_lock_and_current_base(mk, tmp_path):
     p = owner.create_profile(tid, name="x", fingerprint=FP)
     pid = p["id"]
     assert owner.download(pid) == (0, None)
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         owner.upload(pid, "nolock", 0, b"zip")
     assert e.value.status == 423
     lk = owner.lock(pid)["lock"]
     assert owner.upload(pid, lk, 0, b"v1")["version"] == 1
-    with pytest.raises(LoftError) as e:  # stale base
+    with pytest.raises(PigeonError) as e:  # stale base
         owner.upload(pid, lk, 0, b"v1-again")
     assert e.value.status == 409
     assert owner.upload(pid, lk, 1, b"v2")["version"] == 2
@@ -216,7 +216,7 @@ def test_invite_without_key_part_cannot_decrypt(mk):
     code = owner.invite(tid)["code"].split(".")[0]  # server part only
     m = mk()
     m.register("m@x.io", "password1", invite=code)
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         m.team_key(tid)
     assert e.value.status == 403
 
@@ -226,7 +226,7 @@ def test_templates_and_runners_are_encrypted(mk):
     owner.add_template(tid, "US desktop", {"os": "windows", "proxy": "http://u:TPW@h:1"})
     assert member.templates(tid)[0]["settings"]["proxy"] == "http://u:TPW@h:1"
     assert "TPW" not in str(owner.j("GET", f"/teams/{tid}/templates"))
-    with pytest.raises(LoftError):
+    with pytest.raises(PigeonError):
         member.add_template(tid, "nope", {})
     owner.add_runner(tid, "eu-1", "https://runner.example:4420", "RUNNERKEY")
     assert member.runners(tid)[0]["secret"] == "RUNNERKEY"
@@ -234,8 +234,8 @@ def test_templates_and_runners_are_encrypted(mk):
 
 
 # ---------------------------------------------------------------- key rotation
-from loft import crypto  # noqa: E402
-from loft.client import rotate_team_key  # noqa: E402
+from pigeon import crypto  # noqa: E402
+from pigeon.client import rotate_team_key  # noqa: E402
 
 
 def test_rotation_locks_out_removed_member(mk):
@@ -274,14 +274,14 @@ def test_rotation_refused_while_running_and_blocks_locks(mk):
     tid, owner, admin, member, ids = team_of_three(mk)
     p = owner.create_profile(tid, name="x", fingerprint=FP)
     lk = admin.lock(p["id"])["lock"]
-    with pytest.raises(LoftError, match="stop running profiles first"):
+    with pytest.raises(PigeonError, match="stop running profiles first"):
         rotate_team_key(owner, tid, log=lambda m: None)
     admin.unlock(p["id"], lk)
     owner.j("POST", f"/teams/{tid}/rotation/start")
-    with pytest.raises(LoftError) as e:
+    with pytest.raises(PigeonError) as e:
         admin.lock(p["id"])
     assert e.value.status == 423
-    with pytest.raises(LoftError) as e:  # half-done rotation can't be committed
+    with pytest.raises(PigeonError) as e:  # half-done rotation can't be committed
         owner.j("POST", f"/teams/{tid}/rotation/commit", {"epoch": 2, "self_wrapped": "x"})
     assert "not re-encrypted" in e.value.detail
     owner.j("POST", f"/teams/{tid}/rotation/abort")
@@ -295,7 +295,7 @@ def test_stale_key_writes_rejected_then_retried(mk):
     rotate_team_key(owner, tid, log=lambda m: None)
     assert admin.keys[tid][0] == 1  # still stale in memory
     # a raw write with the old epoch is refused...
-    with pytest.raises(LoftError, match="team key rotated"):
+    with pytest.raises(PigeonError, match="team key rotated"):
         admin.j("POST", f"/teams/{tid}/profiles", {"name": "x", "fingerprint": "x"}, headers={"X-Key-Epoch": "1"})
     # ...and the client recovers transparently, writing under the new key
     p = admin.create_profile(tid, name="after", fingerprint=FP, proxy={"server": "http://h:1"})
@@ -307,7 +307,7 @@ def test_rotation_revokes_old_invites(mk):
     tid, owner, admin, member, ids = team_of_three(mk)
     code = owner.invite(tid)["code"]
     rotate_team_key(owner, tid, log=lambda m: None)
-    with pytest.raises(LoftError, match="invite invalid"):
+    with pytest.raises(PigeonError, match="invite invalid"):
         mk().register("late@x.io", "password1", invite=code)
     new = owner.invite(tid)["code"]
     late = mk()
@@ -331,7 +331,7 @@ def test_concurrent_lock_has_one_winner(mk):
         try:
             c.lock(p["id"])
             wins.append(c.device)
-        except LoftError as e:
+        except PigeonError as e:
             losses.append(e.status)
 
     ts = [threading.Thread(target=go, args=(c,)) for c in clients]
@@ -341,7 +341,7 @@ def test_concurrent_lock_has_one_winner(mk):
 
 
 # ---------------------------------------------------------------- team backup / dashboard
-from loft.engine import export_team, import_team  # noqa: E402
+from pigeon.engine import export_team, import_team  # noqa: E402
 
 
 def test_team_backup_restore_roundtrip(mk):
@@ -358,7 +358,7 @@ def test_team_backup_restore_roundtrip(mk):
     assert blob[:4] == b"LFTT" and b"A-SESSION" not in blob and b"PW" not in blob
 
     dest = owner.create_team("Restored")["id"]
-    with pytest.raises(LoftError, match="wrong passphrase"):
+    with pytest.raises(PigeonError, match="wrong passphrase"):
         import_team(owner, dest, blob, "nope", log=lambda m: None)
     out = import_team(owner, dest, blob, "backup pass", log=lambda m: None)
     assert out["profiles"] == 2 and out["templates"] == 1
@@ -387,7 +387,7 @@ def test_rotation_preview_and_overview(mk):
     assert any(a["action"] == "profile.synced" for a in ov["recent"])
     # a member can't see the dashboard or preview
     for call in (lambda: member.overview(tid), lambda: member.rotation_preview(tid)):
-        with pytest.raises(LoftError) as e:
+        with pytest.raises(PigeonError) as e:
             call()
         assert e.value.status == 403
     # running profile shows up and blocks rotation preview's "running" list

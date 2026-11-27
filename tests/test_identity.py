@@ -1,13 +1,13 @@
 """Identity consistency: everything that depends on the profile's language and its exit IP's country must agree, in the REAL browser.
 
-Each case launches Camoufox with options from Loft's own prepare_launch, for an exit IP in a given country (the exit-IP lookup is stubbed,
+Each case launches Camoufox with options from Pigeon's own prepare_launch, for an exit IP in a given country (the exit-IP lookup is stubbed,
 so no network: the country, time zone and language logic is the real code), then reads the actual values back and audits them.
 English is the default language; `language="country"` follows the country's native language."""
 import warnings
 
 import pytest
 
-from loft import engine
+from pigeon import engine
 from tests.test_pigeon import HAVE
 
 pytestmark = pytest.mark.skipif(not HAVE, reason="needs the real Camoufox browser")
@@ -69,7 +69,7 @@ def test_an_explicit_language_is_honoured(tmp_path):
 
 
 def test_the_audit_would_have_caught_the_original_rishi_bug(tmp_path):
-    """Without Loft's voice list Camoufox leaves no default voice, and macOS fills in this machine's own: a mismatch the audit must flag."""
+    """Without Pigeon's voice list Camoufox leaves no default voice, and macOS fills in this machine's own: a mismatch the audit must flag."""
     rows, _ = launch("IT", tmp_path, language="country", voices=False, headless=False)
     bad = failing(rows)
     assert any(b.startswith("default speech voice") for b in bad), rows  # headed, as a user runs it: the host's default shows through
@@ -79,7 +79,7 @@ def test_the_audit_would_have_caught_the_original_rishi_bug(tmp_path):
 
 def test_open_profile_audits_the_real_launch_and_logs_the_result(mk, tmp_path):
     """The audit runs on every real launch, not only in tests, and a profile without a proxy is audited too (against its own language)."""
-    from loft.engine import open_profile
+    from pigeon.engine import open_profile
     from tests.conftest import FP
     owner = mk()
     owner.register("o@x.io", "password1", "Owner")
@@ -88,7 +88,7 @@ def test_open_profile_audits_the_real_launch_and_logs_the_result(mk, tmp_path):
     pid = owner.create_profile(tid, name="a", os=os_name, fingerprint=engine.new_fingerprint(os_name), canvas=engine.default_canvas(os_name))["id"]
     logs = []
     with open_profile(owner, pid, headless=True, home=tmp_path, log=logs.append) as ctx:
-        assert ctx.loft_audit and all(r["ok"] for r in ctx.loft_audit), engine.format_audit(ctx.loft_audit)
+        assert ctx.pigeon_audit and all(r["ok"] for r in ctx.pigeon_audit), engine.format_audit(ctx.pigeon_audit)
     assert any("identity consistent" in m for m in logs), logs
 
 

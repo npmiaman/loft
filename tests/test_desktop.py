@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import loft.client as lc
-import loft.engine as le
-from loft.cli import BadInput, parse_proxy, proxy_url
-from loft.desktop import api_key, make_app
+import pigeon.client as lc
+import pigeon.engine as le
+from pigeon.cli import BadInput, parse_proxy, proxy_url
+from pigeon.desktop import api_key, make_app
 from tests.conftest import FP
 
 
@@ -14,7 +14,7 @@ def app(tmp_path, monkeypatch, server):
     monkeypatch.setattr(lc, "CONFIG", tmp_path / "home" / "config.json")
     monkeypatch.setattr(le, "new_fingerprint", lambda os_name="windows": dict(FP, os=os_name))
     t = TestClient(make_app(), base_url="http://127.0.0.1")
-    t.headers["X-Loft"] = "1"
+    t.headers["X-Pigeon"] = "1"
     return t, server
 
 
@@ -99,13 +99,13 @@ def test_parse_proxy_roundtrip():
 
 
 def test_tls_self_signed_and_bind_rule(tmp_path):
-    from loft.tls import check_bind, fingerprint, self_signed
-    cert, key = self_signed(tmp_path, ["loft.local", "10.0.0.5"])
+    from pigeon.tls import check_bind, fingerprint, self_signed
+    cert, key = self_signed(tmp_path, ["pigeon.local", "10.0.0.5"])
     import sys
     assert cert.exists() and len(fingerprint(cert)) == 64
     if sys.platform != "win32":  # no POSIX modes on Windows
         assert oct(key.stat().st_mode)[-3:] == "600"
-    assert self_signed(tmp_path, ["loft.local"]) == (cert, key)  # reused when hosts are covered
+    assert self_signed(tmp_path, ["pigeon.local"]) == (cert, key)  # reused when hosts are covered
     with pytest.raises(SystemExit):
         check_bind("0.0.0.0", tls=False, insecure=False)
     check_bind("0.0.0.0", tls=True, insecure=False)
@@ -134,14 +134,14 @@ def test_dashboard_backup_restore_via_app(app):
 
 
 def test_proxy_placeholder_expansion():
-    from loft.engine import expand_proxy_placeholders
+    from pigeon.engine import expand_proxy_placeholders
     # per-profile sticky session for a proxynet gateway (or any session proxy)
     p = {"server": "http://gw:8899", "username": "country-us-session-{pid}", "password": "x"}
     expand_proxy_placeholders(p, 42)
     assert p["username"] == "country-us-session-42" and p["server"] == "http://gw:8899"
     p2 = {"server": "http://gw:8899", "username": "session-{session}", "password": "x"}
     expand_proxy_placeholders(p2, 7)
-    assert p2["username"] == "session-loft-7"
+    assert p2["username"] == "session-pigeon-7"
     assert expand_proxy_placeholders(None, 1) is None
     # no placeholder = unchanged
     p3 = {"server": "http://h:1", "username": "static", "password": "x"}

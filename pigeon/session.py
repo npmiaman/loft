@@ -1,4 +1,4 @@
-"""The interactive part of `loft run`: keeps the browser open, serves the control channel, and lets tools
+"""The interactive part of `pigeon run`: keeps the browser open, serves the control channel, and lets tools
 (Pigeon) attach to the live session."""
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .control import SessionControl
-from .pigeon.attach import PigeonHost
+from .agent.attach import PigeonHost
 
 
 def interactive(context, pid: int, info: dict, *, home: Path, log: Callable[[str], None] = print,
@@ -26,14 +26,14 @@ def interactive(context, pid: int, info: dict, *, home: Path, log: Callable[[str
 
     central = None
     if client is not None and info.get("team_id"):  # the team's shared memory: who was DMed, where we commented
-        from .pigeon.central import CentralBrain
+        from .agent.central import CentralBrain
         central = CentralBrain(client, info["team_id"], pid)
     host = host_factory(pid, home, central)
     host.should_stop = should_stop
     ctl = SessionControl(pid, home)
     host.mount(ctl)
     ctl.start()
-    log(f"control channel up for profile {pid}: `loft pigeon attach {pid}` connects the Pigeon agent")
+    log(f"control channel up for profile {pid}: `pigeon agent attach {pid}` connects the agent")
     try:
         while not closed.is_set():
             if should_stop():

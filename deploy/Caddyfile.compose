@@ -1,6 +1,6 @@
 # Caddy config used by docker-compose.yml. Caddy fetches and renews a real
-# Let's Encrypt certificate for LOFT_DOMAIN automatically.
-{$LOFT_DOMAIN} {
+# Let's Encrypt certificate for PIGEON_DOMAIN automatically.
+{$PIGEON_DOMAIN} {
 	reverse_proxy server:4400
 	request_body {
 		max_size 2GB

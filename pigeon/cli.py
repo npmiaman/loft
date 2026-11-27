@@ -1,4 +1,4 @@
-"""loft CLI: server, runner, account, team, profile, cookie, bundle, template and automation commands."""
+"""pigeon CLI: server, runner, account, team, profile, cookie, bundle, template and automation commands."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .client import Client, LoftError, load_config, save_config
+from .compat import default_dir, env
+from .client import Client, PigeonError, load_config, save_config
 
 
 class BadInput(ValueError):
@@ -56,7 +57,7 @@ def _team(c: Client, cfg: dict, override: int | None = None) -> int:
         return cfg["team"]
     teams = c.me()["teams"]
     if not teams:
-        raise SystemExit("you are in no team: `loft team create NAME` or `loft join CODE`")
+        raise SystemExit("you are in no team: `pigeon team create NAME` or `pigeon join CODE`")
     cfg = load_config()
     cfg["team"] = teams[0]["id"]
     save_config(cfg)
@@ -79,7 +80,7 @@ def _uid(c: Client, tid: int, email: str) -> int:
 def _runner(c: Client, tid: int, name: str | None) -> dict:
     rs = c.runners(tid)
     if not rs:
-        raise SystemExit("no cloud runners: an admin adds one with `loft runner add NAME URL KEY`")
+        raise SystemExit("no cloud runners: an admin adds one with `pigeon runner add NAME URL KEY`")
     if name:
         for r in rs:
             if r["name"] == name:
@@ -101,16 +102,16 @@ def _print_profiles(ps: list) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="loft", description="Team browser profiles on Camoufox")
+    ap = argparse.ArgumentParser(prog="pigeon", description="Team browser profiles on Camoufox")
     ap.add_argument("--team", type=int, help="team id (default: saved/first team)")
     sub = ap.add_subparsers(dest="cmd")
 
     s = sub.add_parser("server", help="run the cloud server")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=4400)
-    s.add_argument("--data", default=None, help="data dir (default ~/.loft-server)")
+    s.add_argument("--data", default=None, help="data dir (default ~/.pigeon-server)")
     s.add_argument("--db", help="postgresql://user:pass@host/db (default: SQLite in the data dir)")
-    s.add_argument("--blobs", help="s3://bucket/prefix (default: files in the data dir; LOFT_S3_ENDPOINT for non-AWS)")
+    s.add_argument("--blobs", help="s3://bucket/prefix (default: files in the data dir; PIGEON_S3_ENDPOINT for non-AWS)")
     s.add_argument("--tls-cert")
     s.add_argument("--tls-key")
     s.add_argument("--self-signed", metavar="HOSTS", help="comma-separated names/IPs for a generated cert")
@@ -199,11 +200,11 @@ def build_parser() -> argparse.ArgumentParser:
     ck.add_argument("action", choices=["import", "export"])
     ck.add_argument("id", type=int)
     ck.add_argument("file", nargs="?")
-    xp = sub.add_parser("export", help="export a profile to a .loftprofile bundle")
+    xp = sub.add_parser("export", help="export a profile to a .pigeonprofile bundle")
     xp.add_argument("id", type=int)
     xp.add_argument("file")
     xp.add_argument("--no-passphrase", action="store_true", help="write it unencrypted (contains cookies!)")
-    ip = sub.add_parser("import", help="import a .loftprofile bundle as a new profile")
+    ip = sub.add_parser("import", help="import a .pigeonprofile bundle as a new profile")
     ip.add_argument("file")
     ip.add_argument("--name")
 
@@ -239,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("rotate-key", help="admin: new team key, re-encrypt everything, re-key remaining members")
     sub.add_parser("apikey", help="show the local automation API key (desktop app /v1)")
     sub.add_parser("fetch-browser", help="download the Camoufox browser (~1.3 GB)")
-    from .pigeon.cli import register as register_pigeon
+    from .agent.cli import register as register_pigeon
     register_pigeon(sub)
     return ap
 
@@ -263,7 +264,7 @@ def main(argv=None) -> None:
 
     if args.cmd == "server":
         from .server import create_app
-        data = Path(args.data or "~/.loft-server").expanduser()
+        data = Path(args.data or default_dir(".pigeon-server", ".loft-server")).expanduser()
         _serve(create_app(data, db_url=args.db, blobs_url=args.blobs), args.host, args.port, args.tls_cert, args.tls_key, args.self_signed, args.insecure, data)
         return
     if args.cmd == "app":
@@ -279,9 +280,9 @@ def main(argv=None) -> None:
         from .runner import create_runner
         key = args.key or secrets.token_urlsafe(24)
         if not args.key:
-            print(f"runner key (give to an admin for `loft runner add`): {key}")
+            print(f"runner key (give to an admin for `pigeon runner add`): {key}")
         _serve(create_runner(key), args.host, args.port, args.tls_cert, args.tls_key, args.self_signed,
-               args.insecure, Path("~/.loft-runner").expanduser())
+               args.insecure, default_dir(".pigeon-runner", ".loft-runner"))
         return
     if args.cmd == "apikey":
         from .desktop import api_key
@@ -302,13 +303,13 @@ def main(argv=None) -> None:
         print(f"signed in to {server} as {args.email}")
         return
 
-    if args.cmd == "pigeon" and args.pcmd == "config":  # the DeepSeek key lives on this machine only: no sign-in needed
-        from .pigeon.cli import handle
+    if args.cmd in ("agent", "pigeon") and args.pcmd == "config":  # the DeepSeek key lives on this machine only: no sign-in needed
+        from .agent.cli import handle
         return handle(args, None)
 
     c = Client(persist=True)
     if not c.token:
-        raise SystemExit("not signed in: `loft login EMAIL --server URL`")
+        raise SystemExit("not signed in: `pigeon login EMAIL --server URL`")
 
     if args.cmd == "whoami":
         me = c.me()
@@ -340,8 +341,8 @@ def main(argv=None) -> None:
         print(f"imported as profile {p['id']}: {p['name']} (v{p['version']})")
         return
 
-    if args.cmd == "pigeon":
-        from .pigeon.cli import handle
+    if args.cmd in ("agent", "pigeon"):
+        from .agent.cli import handle
         return handle(args, c, lambda: _team(c, cfg, args.team))
 
     tid = _team(c, cfg, args.team)
@@ -356,7 +357,7 @@ def main(argv=None) -> None:
         print("ok")
     elif args.cmd == "kick":
         c.remove_member(tid, _uid(c, tid, args.email))
-        print("ok. They still hold the current team key: run `loft rotate-key` to lock them out.")
+        print("ok. They still hold the current team key: run `pigeon rotate-key` to lock them out.")
     elif args.cmd == "audit":
         for a in c.audit(tid, args.n):
             ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(a["at"]))
@@ -397,11 +398,11 @@ def main(argv=None) -> None:
         _print_profiles([c.patch_profile(args.id, **fields)])
     elif args.cmd == "run":
         from .engine import run_profile
-        run_profile(c, args.id, headless=args.headless or os.environ.get("LOFT_HEADLESS") == "1")  # env: for servers and tests
+        run_profile(c, args.id, headless=args.headless or env("HEADLESS") == "1")  # env: for servers and tests
     elif args.cmd == "exec":
         from .engine import open_profile
         with open_profile(c, args.id, headless=args.headless) as context:
-            runpy.run_path(args.script, init_globals={"context": context, "profile": context.loft_info},
+            runpy.run_path(args.script, init_globals={"context": context, "profile": context.pigeon_info},
                            run_name="__main__")
     elif args.cmd == "share":
         c.share(args.id, _uid(c, tid, args.email), args.level)
@@ -524,7 +525,7 @@ def main(argv=None) -> None:
 def entry() -> None:
     try:
         main()
-    except LoftError as e:
+    except PigeonError as e:
         print(f"error: {e.detail}", file=sys.stderr)
         sys.exit(1)
     except BadInput as e:
@@ -532,8 +533,8 @@ def entry() -> None:
         sys.exit(2)
     except ModuleNotFoundError as e:
         if e.name and e.name.split(".")[0] in ("camoufox", "pywebview", "webview"):
-            print("error: this command needs the browser. Install it with:  pip install 'loft[client]'  "
-                  "(or 'loft[desktop]' for the app).", file=sys.stderr)
+            print("error: this command needs the browser. Install it with:  pip install 'pigeon[client]'  "
+                  "(or 'pigeon[desktop]' for the app).", file=sys.stderr)
             sys.exit(3)
         raise
     except KeyboardInterrupt:

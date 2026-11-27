@@ -9,10 +9,10 @@ from datetime import datetime
 
 import pytest
 
-from loft.client import LoftError
-from loft.pigeon import rotate as rot
-from loft.pigeon.rotate import peek_state, rotate, skip_reason, summary
-from loft.pigeon.state import STATE_NAME
+from pigeon.client import PigeonError
+from pigeon.agent import rotate as rot
+from pigeon.agent.rotate import peek_state, rotate, skip_reason, summary
+from pigeon.agent.state import STATE_NAME
 from tests.conftest import FP
 
 NOW = time.time()
@@ -94,7 +94,7 @@ def test_skips_accounts_with_nothing_to_do_without_launching_or_pausing_for_them
     })
     res = rig.run([1, 2, 3, 4])
     assert statuses(res) == [(1, "skipped"), (2, "skipped"), (3, "ran"), (4, "ran")]
-    assert [r["detail"] for r in res[:2]] == ["Pigeon was never set up on this account", "no product set up"]
+    assert [r["detail"] for r in res[:2]] == ["The agent was never set up on this account", "no product set up"]
     assert rig.launched == [3, 4] and len(rig.sleeps) == 1  # only one pause: skipped accounts don't cost one
 
 
@@ -134,11 +134,11 @@ def test_a_failure_does_not_stop_the_rotation_unless_asked():
 
 
 def test_accounts_in_use_or_open_here_are_skipped_not_failed():
-    rig = Rig(fail={2: LoftError(423, "in use by sam on laptop")})
+    rig = Rig(fail={2: PigeonError(423, "in use by sam on laptop")})
     res = rotate([1, 2, 3], mode="full", peek=rig.peek, launch=rig.launch, is_open=lambda p: p == 3, sleep=lambda s: None, log=lambda m: None)
     assert statuses(res) == [(1, "ran"), (2, "skipped"), (3, "skipped")]
     assert "in use by sam" in res[1]["detail"] and "attach" in res[2]["detail"]
-    unreadable = Rig(states={1: LoftError(404, "profile not found")})
+    unreadable = Rig(states={1: PigeonError(404, "profile not found")})
     assert statuses(unreadable.run([1, 2])) == [(1, "skipped"), (2, "ran")]
 
 
@@ -203,7 +203,7 @@ def test_skip_reason_active_hours_and_cap_ramp():
 
 # ------------------------------------------------------------------ peeking at real server data without locking
 def test_peek_reads_state_without_lock_or_upload(mk, tmp_path):
-    from loft.pigeon.runner import with_state
+    from pigeon.agent.runner import with_state
     owner = mk()
     owner.register("o@x.io", "password1", "Owner")
     tid = owner.create_team("T")["id"]
@@ -248,14 +248,14 @@ def test_peek_reads_state_without_lock_or_upload(mk, tmp_path):
 # ------------------------------------------------------------------ the CLI command
 def _parse(argv):
     import argparse
-    from loft.pigeon.cli import register
+    from pigeon.agent.cli import register
     ap = argparse.ArgumentParser()
     register(ap.add_subparsers(dest="cmd", required=True))
     return ap.parse_args(["pigeon", *argv])
 
 
 def test_run_all_selects_accounts_and_validates(mk, monkeypatch, capsys):
-    from loft.pigeon.cli import handle
+    from pigeon.agent.cli import handle
     owner = mk()
     owner.register("o@x.io", "password1", "Owner")
     tid = owner.create_team("T")["id"]
@@ -284,7 +284,7 @@ def prof(pid, name, proxy="__direct__"):
 
 
 def test_proxy_warnings_catch_accounts_that_would_share_an_exit():
-    from loft.pigeon.rotate import proxy_warnings as w
+    from pigeon.agent.rotate import proxy_warnings as w
     gw = "http://gateway.example:8899"
     # each profile gets its own sticky session when the username carries {pid} or {session}: nothing to warn about
     assert w([prof(1, "a", dict(server=gw, username="country-us-session-{pid}", password="p")),
@@ -309,7 +309,7 @@ def test_proxy_warnings_catch_accounts_that_would_share_an_exit():
 
 
 def test_run_all_warns_about_shared_exits_using_real_encrypted_profiles(mk, monkeypatch, capsys):
-    from loft.pigeon.cli import handle
+    from pigeon.agent.cli import handle
     owner = mk()
     owner.register("o@x.io", "password1", "Owner")
     tid = owner.create_team("T")["id"]
@@ -336,13 +336,13 @@ def test_run_all_warns_about_shared_exits_using_real_encrypted_profiles(mk, monk
     assert out.count("⚠") == 2  # clash and bare groups; the good ones are not flagged
 
 
-# ------------------------------------------------------------------ `loft pigeon accounts`: each account bound to ONE unique proxy, team-wide
+# ------------------------------------------------------------------ `pigeon agent accounts`: each account bound to ONE unique proxy, team-wide
 WEBSHARE = ["siawaiso-1:hunter2pw@p.webshare.io:80", "siawaiso-2:hunter2pw@p.webshare.io:80", "siawaiso-3:hunter2pw@p.webshare.io:80"]  # Webshare's scheme-less format
 
 
 def _pool(monkeypatch, tmp_path, lines, exits=None, ok=True):
     """A proxies file; check_proxy is stubbed with the exit IP each proxy username 'has' (or a distinct default)."""
-    import loft.engine as engine
+    import pigeon.engine as engine
     f = tmp_path / "proxies.txt"
     f.write_text("# my pool\n" + "\n".join(lines) + "\n\n")
     exits = exits or {}
@@ -363,7 +363,7 @@ def _accounts(mk, monkeypatch, tmp_path, lines, exits=None, ok=True):
 
 
 def _acct(owner, tid, capsys, *argv):
-    from loft.pigeon.cli import handle
+    from pigeon.agent.cli import handle
     handle(_parse(["accounts", *argv]), owner, lambda: tid)
     return capsys.readouterr().out
 
@@ -371,7 +371,7 @@ def _acct(owner, tid, capsys, *argv):
 def test_accounts_add_binds_each_account_to_its_own_proxy_and_shares_it_with_the_team(mk, monkeypatch, tmp_path, capsys):
     owner, admin, tid, f = _accounts(mk, monkeypatch, tmp_path, WEBSHARE)
     out = _acct(owner, tid, capsys, "add", "--proxies", str(f), "--name", "Reddit {n}")
-    assert "created 3 accounts" in out and "loft pigeon run-all --tag reddit" in out and "loft pigeon run" in out
+    assert "created 3 accounts" in out and "pigeon agent run-all --tag reddit" in out and "pigeon agent run" in out
     profs = {p["name"]: p for p in owner.profiles(tid)}
     assert set(profs) == {"Reddit 1", "Reddit 2", "Reddit 3"}
     # exactly one proxy each, all different, bound for good, with the password only readable by team members (it is ciphertext on the server)
@@ -411,7 +411,7 @@ def test_accounts_add_refuses_duplicates_dead_proxies_and_shared_exits(mk, monke
 
 
 def test_accounts_add_with_no_check_and_with_pid_placeholders(mk, monkeypatch, tmp_path, capsys):
-    import loft.engine as engine
+    import pigeon.engine as engine
     lines = ["http://country-us-session-{pid}:GATEWAY@gateway.example:8899"]
     owner, _, tid, f = _accounts(mk, monkeypatch, tmp_path, lines)
     monkeypatch.setattr(engine, "check_proxy", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not check placeholder proxies before they have a pid")))

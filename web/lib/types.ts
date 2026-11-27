@@ -15,7 +15,7 @@ export type PigeonStatus = {
   leads: Record<string, number>; log: { t: number; level: string; msg: string }[];
 };
 export type Job = { alive: boolean; log: string[]; pigeon: PigeonStatus | null };
-export type LoftState = {
+export type PigeonState = {
   signed_in: boolean; server?: string; browser: boolean; host_os: string; jobs: Record<string, Job>;
   me?: { id: number; email: string; name?: string; teams: Team[] }; device?: string; team?: number; role?: Team["role"];
   has_key?: boolean; profiles?: Profile[]; members?: { id: number; name: string; email: string; role: string }[];

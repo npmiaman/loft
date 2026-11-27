@@ -1,9 +1,9 @@
 """Desktop app: local web UI + local automation API, bound to 127.0.0.1 only.
 
-* /api/*  - the UI's own API (needs the X-Loft header, which other websites can't send).
-* /v1/*   - automation API for scripts (needs the API key from `loft apikey`).
+* /api/*  - the UI's own API (needs the X-Pigeon header, which other websites can't send).
+* /v1/*   - automation API for scripts (needs the API key from `pigeon apikey`).
 
-Each launched profile runs as its own `loft run` subprocess so a browser crash never
+Each launched profile runs as its own `pigeon run` subprocess so a browser crash never
 takes the app down. Stopping sends SIGINT, which closes the browser and syncs.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from .cli import BadInput, parse_proxy, proxy_url
 from . import control
-from .client import Client, LoftError, load_config, save_config
+from .client import Client, PigeonError, load_config, save_config
 
 UI = Path(__file__).with_name("ui.html")
 WEB = Path(__file__).with_name("web_ui")  # the Next.js app (a static export): `npm run build` in web/ copies it here
@@ -36,7 +36,7 @@ WEB = Path(__file__).with_name("web_ui")  # the Next.js app (a static export): `
 def api_key() -> str:
     cfg = load_config()
     if not cfg.get("api_key"):
-        cfg["api_key"] = "loft_" + secrets.token_urlsafe(24)
+        cfg["api_key"] = "pigeon_" + secrets.token_urlsafe(24)
         save_config(cfg)
     return cfg["api_key"]
 
@@ -45,7 +45,7 @@ def self_cmd(*args: str) -> list[str]:
     """Command that runs this program's CLI, for both source installs and frozen desktop builds."""
     if getattr(sys, "frozen", False):
         return [sys.executable, *args]
-    return [sys.executable, "-m", "loft.cli", *args]
+    return [sys.executable, "-m", "pigeon.cli", *args]
 
 
 def browser_installed() -> bool:
@@ -155,15 +155,15 @@ def make_app() -> FastAPI:
         if host not in ("127.0.0.1", "localhost"):
             return JSONResponse({"detail": "bad host"}, 403)
         path = request.url.path
-        if path.startswith("/api/") and request.headers.get("x-loft") != "1":
-            return JSONResponse({"detail": "missing X-Loft header"}, 403)
+        if path.startswith("/api/") and request.headers.get("x-pigeon") != "1" and request.headers.get("x-loft") != "1":  # x-loft: the old name
+            return JSONResponse({"detail": "missing X-Pigeon header"}, 403)
         if path.startswith("/v1/"):
             k = request.headers.get("x-api-key") or request.headers.get("authorization", "").removeprefix("Bearer ")
             if not k or not secrets.compare_digest(k, api_key()):
-                return JSONResponse({"detail": "bad API key (see `loft apikey`)"}, 401)
+                return JSONResponse({"detail": "bad API key (see `pigeon apikey`)"}, 401)
         try:
             return await call_next(request)
-        except LoftError as e:
+        except PigeonError as e:
             return JSONResponse({"detail": e.detail}, e.status)
         except BadInput as e:
             return JSONResponse({"detail": str(e)}, 400)
@@ -240,7 +240,7 @@ def make_app() -> FastAPI:
             if k.startswith("run-") and v["alive"]:
                 try:
                     v["pigeon"] = control.request(int(k[4:]), "GET", "/pigeon/status", timeout=1)
-                except LoftError:
+                except PigeonError:
                     pass  # still starting up, or already closing
         base = {"server": cfg.get("server"), "browser": browser_installed(), "jobs": live, "host_os": host_os()}
         if not cfg.get("token"):
@@ -248,7 +248,7 @@ def make_app() -> FastAPI:
         c = Client(persist=True)
         try:
             me = c.me()
-        except LoftError as e:
+        except PigeonError as e:
             if e.status == 401:
                 return {**base, "signed_in": False}
             raise
@@ -385,7 +385,7 @@ def make_app() -> FastAPI:
         blob = export_bundle(c, pid, body.get("passphrase") or None)
         name = c.profile(pid)["name"].replace('"', "")
         return Response(blob, media_type="application/octet-stream",
-                        headers={"Content-Disposition": f'attachment; filename="{name}.loftprofile"'})
+                        headers={"Content-Disposition": f'attachment; filename="{name}.pigeonprofile"'})
 
     @app.post("/api/import")
     def import_(body: dict):
@@ -428,11 +428,11 @@ def make_app() -> FastAPI:
         c = client()
         return c.remove_member(team(c), uid)
 
-    # ------------------------------------------------------------ Pigeon (see loft/pigeon)
+    # ------------------------------------------------------------ Pigeon (see pigeon/agent)
     def _session(pid: int, method: str, path: str, body: dict | None = None, timeout: float = 130) -> dict:
         try:
             return control.request(pid, method, path, body, timeout=timeout)
-        except LoftError as e:
+        except PigeonError as e:
             raise HTTPException(e.status, e.detail)
 
     # Everything Pigeon can do runs inside the profile's open browser session; these pass straight through to it.
@@ -493,7 +493,7 @@ def make_app() -> FastAPI:
         c = client()
         blob = export_team(c, team(c), body["passphrase"], log=lambda m: None)
         return Response(blob, media_type="application/octet-stream",
-                        headers={"Content-Disposition": 'attachment; filename="loft-team-backup.loftbackup"'})
+                        headers={"Content-Disposition": 'attachment; filename="pigeon-team-backup.pigeonbackup"'})
 
     @app.post("/api/restore")
     def restore(body: dict):
@@ -585,7 +585,7 @@ def _try_key(c: Client, tid: int) -> bool:
     try:
         c.team_key(tid)
         return True
-    except LoftError:
+    except PigeonError:
         return False
 
 
@@ -602,7 +602,7 @@ def serve(port: int = 4410, native: bool = True, open_browser: bool = True) -> N
     if not native:
         if open_browser:
             threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-        print(f"Loft desktop on {url}")
+        print(f"Pigeon desktop on {url}")
         server.run()
         return
     t = threading.Thread(target=server.run, daemon=True)
@@ -612,6 +612,6 @@ def serve(port: int = 4410, native: bool = True, open_browser: bool = True) -> N
         if server.started:
             break
         time.sleep(0.05)
-    webview.create_window("Loft", url, width=1200, height=800, min_size=(900, 600))
+    webview.create_window("Pigeon", url, width=1200, height=800, min_size=(900, 600))
     webview.start()
     server.should_exit = True

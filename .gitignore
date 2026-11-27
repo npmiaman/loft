@@ -4,9 +4,9 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
-*.loftprofile
+*.pigeonprofile
 
 dist/
 
 # built Next.js UI (made by `npm run build` in web/)
-loft/web_ui/
+pigeon/web_ui/

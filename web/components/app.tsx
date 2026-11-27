@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { api } from "@/lib/api";
-import { LoftProvider } from "@/lib/store";
+import { PigeonProvider } from "@/lib/store";
 import { AccountsPage } from "./accounts/accounts-page";
 import { Login } from "./login";
 import { ActivityPage } from "./pages/activity";
@@ -11,10 +11,10 @@ import { Shell, type Tab } from "./shell";
 import { Button } from "./ui/button";
 import { Field, Input } from "./ui/field";
 import { Callout } from "./ui/bits";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 
 function NoTeam() {
-  const { act } = useLoft(); const [name, setName] = React.useState(""); const [code, setCode] = React.useState("");
+  const { act } = usePigeon(); const [name, setName] = React.useState(""); const [code, setCode] = React.useState("");
   return (
     <div className="mx-auto mt-24 w-full max-w-md space-y-6 rounded-xl border border-line p-6">
       <div><h1 className="text-xl font-semibold tracking-tight">You're not in a team yet</h1><p className="text-mute">Create one, or join with an invite code.</p></div>
@@ -25,7 +25,7 @@ function NoTeam() {
 }
 
 function Signed() {
-  const { s } = useLoft();
+  const { s } = usePigeon();
   const [tab, setTabState] = React.useState<Tab>("accounts");
   React.useEffect(() => { const h = window.location.hash.slice(1) as Tab; if (["accounts", "team", "activity", "overview"].includes(h)) setTabState(h); }, []);
   const setTab = (t: Tab) => { setTabState(t); window.history.replaceState(null, "", "#" + t); };
@@ -41,14 +41,14 @@ function Signed() {
 
 export function App() {
   return (
-    <LoftProvider>
+    <PigeonProvider>
       {(s, error, refresh) => !s
         ? <div className="grid h-screen place-items-center">{error
-            ? <p className="max-w-sm text-center text-bad">Can't reach the Loft app: {error}</p>
+            ? <p className="max-w-sm text-center text-bad">Can't reach the Pigeon app: {error}</p>
             : <i className="size-5 animate-spin rounded-full border-2 border-line2 border-t-ink" aria-label="Loading" />}</div>
         : !s.signed_in
           ? <Login server={s.server} onDone={refresh} />
           : <Signed />}
-    </LoftProvider>
+    </PigeonProvider>
   );
 }

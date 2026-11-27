@@ -15,7 +15,7 @@ import zipfile
 from datetime import datetime
 from typing import Callable
 
-from ..client import Client, LoftError
+from ..client import Client, PigeonError
 from ..engine import PROFILES, LocalProfile, expand_proxy_placeholders
 from . import governor
 from .state import DEFAULT_SETTINGS, STATE_NAME
@@ -42,7 +42,7 @@ def peek_state(client: Client, pid: int, home=PROFILES) -> dict | None:
 def skip_reason(mode: str, raw: dict | None, now: float | None = None, at: datetime | None = None) -> str | None:
     """Why launching this account would be pointless right now, or None if it's worth a session."""
     if raw is None:
-        return "Pigeon was never set up on this account"
+        return "The agent was never set up on this account"
     now = now or time.time()
     s = {**DEFAULT_SETTINGS, **raw.get("settings", {})}
     if mode != "dm":
@@ -86,7 +86,7 @@ def proxy_warnings(profiles: list[dict]) -> list[str]:
             continue
         who = ", ".join(f"{p['name']} (#{p['id']})" for p in ps)
         if key == ("direct",):
-            out.append(f"{who} have no proxy: they would all use this machine's own IP. Give each its own (see `loft bulk --proxies`)")
+            out.append(f"{who} have no proxy: they would all use this machine's own IP. Give each its own (see `pigeon bulk --proxies`)")
         else:
             out.append(f"{who} would share one proxy session ({key[0]}, user {key[1]!r}) and so one exit IP. "
                        "Put {pid} or {session} in the proxy username (e.g. a proxynet gateway) so each gets its own sticky exit")
@@ -124,11 +124,11 @@ def rotate(pids: list[int], *, mode: str, peek: Callable[[int], dict | None], la
                     log(f"time budget used up ({max_total / 60:g} min); not starting more accounts")
                     return results
                 if is_open(pid):
-                    add(pid, rnd, "skipped", "open in a session here: use `loft pigeon attach`")
+                    add(pid, rnd, "skipped", "open in a session here: use `pigeon agent attach`")
                     continue
                 try:
                     why = skip_reason(mode, peek(pid))
-                except LoftError as e:
+                except PigeonError as e:
                     add(pid, rnd, "skipped", f"can't read it: {e.detail}")
                     continue
                 if why:
@@ -146,7 +146,7 @@ def rotate(pids: list[int], *, mode: str, peek: Callable[[int], dict | None], la
                     delta = launch(pid)
                     add(pid, rnd, "ran", ", ".join(f"{k} {v}" for k, v in delta.items() if v) or "nothing new", delta)
                     ran_last = True
-                except LoftError as e:  # in use by a teammate, no access, ...
+                except PigeonError as e:  # in use by a teammate, no access, ...
                     add(pid, rnd, "skipped", f"{e.detail}")
                 except KeyboardInterrupt:
                     add(pid, rnd, "interrupted", "stopped by you; profile synced")

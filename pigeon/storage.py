@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+from .compat import env
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(id {pk}, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL, pw_hash TEXT NOT NULL,
   vault_salt TEXT NOT NULL, pubkey TEXT, privkey TEXT, created {real} NOT NULL);
@@ -158,15 +160,14 @@ class FileBlobs:
 
 class S3Blobs:
     """Any S3-compatible store (AWS, R2, MinIO, B2). Credentials come from the usual AWS env/config.
-    url: s3://bucket/optional/prefix ; LOFT_S3_ENDPOINT for non-AWS endpoints."""
+    url: s3://bucket/optional/prefix ; PIGEON_S3_ENDPOINT for non-AWS endpoints."""
 
     def __init__(self, url: str, endpoint: Optional[str] = None, client: Any = None):
-        import os
         import boto3
         rest = url.removeprefix("s3://")
         self.bucket, _, prefix = rest.partition("/")
         self.prefix = prefix.strip("/") + "/" if prefix.strip("/") else ""
-        self.s3 = client or boto3.client("s3", endpoint_url=endpoint or os.environ.get("LOFT_S3_ENDPOINT") or None)
+        self.s3 = client or boto3.client("s3", endpoint_url=endpoint or env("S3_ENDPOINT") or None)
 
     def _k(self, key: str) -> str:
         if "/" in key or ".." in key:

@@ -31,7 +31,7 @@ class Ctx:
 
     def need_llm(self) -> Llm:
         if not self.llm:
-            raise RuntimeError("No DeepSeek key: `loft pigeon config --deepseek-key KEY` or set DEEPSEEK_API_KEY.")
+            raise RuntimeError("No DeepSeek key: `pigeon agent config --deepseek-key KEY` or set DEEPSEEK_API_KEY.")
         return self.llm
 
     def team(self, sub: str) -> str:
@@ -86,7 +86,7 @@ def settings_set(c: Ctx, a: dict) -> dict:
 
 def product_set(c: Ctx, a: dict) -> dict:
     if not c.st.product:
-        raise RuntimeError("No product yet: run `loft pigeon setup ID URL` first.")
+        raise RuntimeError("No product yet: run `pigeon agent setup ID URL` first.")
     for k, v in (a.get("fields") or {}).items():
         if k in PRODUCT_LISTS:
             c.st.product[k] = [x.strip() for x in (v if isinstance(v, list) else str(v).split("|")) if x.strip()]
@@ -100,7 +100,7 @@ def product_set(c: Ctx, a: dict) -> dict:
 def product_show(c: Ctx, _a: dict) -> dict:
     p = c.st.product
     if not p:
-        return {"product": None, "out": "no product yet: run `loft pigeon setup ID URL`"}
+        return {"product": None, "out": "no product yet: run `pigeon agent setup ID URL`"}
     lines = [f"{k:15} {p[k]}" for k in PRODUCT_TEXT] + [f"{k:15} {' | '.join(p[k])}" for k in PRODUCT_LISTS]
     return {"product": p, "out": "\n".join(lines)}
 
@@ -120,7 +120,7 @@ def subs_edit(c: Ctx, a: dict) -> dict:
             s["enabled"] = False
     rows = [f"  {'on ' if s['enabled'] else 'off'} r/{s['name']:24} score {s['score']:>3}  rules:{s['rules_risk']:6} {s['reason'][:60]}"
             for s in c.st.subreddits]
-    return {"subreddits": c.st.subreddits, "out": "\n".join(rows) or "no subreddits: run `loft pigeon setup`"}
+    return {"subreddits": c.st.subreddits, "out": "\n".join(rows) or "no subreddits: run `pigeon agent setup`"}
 
 
 def template_show(c: Ctx, _a: dict) -> dict:
@@ -292,7 +292,7 @@ def opp_skip(c: Ctx, a: dict) -> dict:
 
 def ideas_generate(c: Ctx, _a: dict) -> dict:
     if not c.st.product:
-        raise RuntimeError("No product yet: run `loft pigeon setup ID URL` first.")
+        raise RuntimeError("No product yet: run `pigeon agent setup ID URL` first.")
     subs = [s for s in c.st.subreddits if s["enabled"]][:8]
     ctx = "\n".join(t for t in (c.team(s["name"]) for s in subs) if t)
     c.st.post_ideas[:] = brain.generate_post_ideas(c.need_llm(), c.st.product, subs, ctx)
@@ -301,7 +301,7 @@ def ideas_generate(c: Ctx, _a: dict) -> dict:
 
 def ideas_list(c: Ctx, _a: dict) -> dict:
     out = "\n".join(f"id: {i['id']}\nr/{i['subreddit']} — {i['title']}\n{i['body']}\n(angle: {i['angle']})\n" for i in c.st.post_ideas)
-    return {"ideas": c.st.post_ideas, "out": out or "no post ideas yet: `loft pigeon ideas ID --generate`"}
+    return {"ideas": c.st.post_ideas, "out": out or "no post ideas yet: `pigeon agent ideas ID --generate`"}
 
 
 def posts_list(c: Ctx, _a: dict) -> dict:

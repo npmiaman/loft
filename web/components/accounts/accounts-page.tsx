@@ -3,7 +3,7 @@ import { Check, Download, Plus, Search } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
 import { api } from "@/lib/api";
-import { useLoft } from "@/lib/store";
+import { usePigeon } from "@/lib/store";
 import type { Profile } from "@/lib/types";
 import { Callout, Card, PageHead } from "../ui/bits";
 import { Button } from "../ui/button";
@@ -24,13 +24,13 @@ function Steps({ has, opened, piged }: { has: boolean; opened: boolean; piged: b
     <ol className="grid gap-4 md:grid-cols-3">
       {step(1, has, "Add an account", "Give it a name and its own proxy.")}
       {step(2, opened, "Open it and sign in", "Press Open browser, sign in to Reddit once, then Close & save.")}
-      {step(3, piged, "Start Pigeon", "It finds people and drafts messages. You approve them before anything is sent.")}
+      {step(3, piged, "Start the agent", "It finds people and drafts messages. You approve them before anything is sent.")}
     </ol>
   );
 }
 
 export function AccountsPage() {
-  const { s, canAdmin, act } = useLoft();
+  const { s, canAdmin, act } = usePigeon();
   const ps = s.profiles ?? [];
   const [q, setQ] = React.useState("");
   const [dlg, setDlg] = React.useState<null | "add" | "many">(null);
@@ -38,7 +38,7 @@ export function AccountsPage() {
   const [pg, setPg] = React.useState<number | null>(null);
   const [modes, setModes] = React.useState<Record<number, string>>({});
   const [off, setOff] = React.useState(true);
-  React.useEffect(() => setOff(localStorage.getItem("loft.ob.off") === "1"), []);
+  React.useEffect(() => setOff(localStorage.getItem("pigeon.ob.off") === "1"), []);
 
   const has = ps.length > 0, opened = ps.some((p) => p.version > 0 || p.running_here);
   const piged = Object.values(s.jobs ?? {}).some((j) => j.pigeon && (j.pigeon.state !== "idle" || j.pigeon.stats.leads > 0));
@@ -63,7 +63,7 @@ export function AccountsPage() {
       {has && !off && !(has && opened && piged) && (
         <Card className="mb-5 p-5">
           <div className="mb-3 flex items-center justify-between"><b>Get started</b>
-            <Button size="sm" variant="ghost" onClick={() => { localStorage.setItem("loft.ob.off", "1"); setOff(true); }}>Dismiss</Button></div>
+            <Button size="sm" variant="ghost" onClick={() => { localStorage.setItem("pigeon.ob.off", "1"); setOff(true); }}>Dismiss</Button></div>
           <Steps has={has} opened={opened} piged={piged} />
         </Card>
       )}
