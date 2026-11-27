@@ -69,24 +69,23 @@ def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
     page.click("button:text-is('Create account')")
     page.fill("#tn", "Agency")
     page.click("button:text-is('Create')")
-    page.click("button:text-is('New profile')")
+    page.click("button:text-is('Add account')")
     page.fill("#n_name", "Client A")
-    page.select_option("#n_canvas", "real")
     page.click("#n_go")
     page.wait_for_selector("td:has-text('Client A')", timeout=60000)
 
     # the app launches the profile as its own subprocess; once that session's control channel is up, the panel appears
-    page.click("button:text-is('Run')")
-    page.wait_for_selector("text=running here", timeout=60000)
-    page.wait_for_selector("button:text-is('Open Pigeon')", timeout=120000)
-    page.click("button:text-is('Open Pigeon')")
+    page.click("button:text-is('Open browser')")
+    page.wait_for_selector("text=Open on this computer", timeout=60000)
+    page.wait_for_selector("button:text-is('Pigeon controls')", timeout=120000)
+    page.click("button:text-is('Pigeon controls')")
     page.wait_for_selector("#pg h3")
 
     def panel():
         page.wait_for_timeout(500)
         return page.inner_text("#pg")
 
-    assert "team brain on" in panel() and "No leads here" in panel()
+    assert "team history: on" in panel() and "No leads here" in panel()
 
     # Leads: the List DMer, end to end through the desktop backend, the control channel and the session's state
     page.fill("#pgimp", "spez\nu/example_user\nnot valid!")
@@ -95,37 +94,37 @@ def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
     assert "u/spez" in panel() and "u/example_user" in panel()
 
     # Messages: save a template and it comes back
-    page.click("#pg button:text-is('messages')")
+    page.click("#pg button:text-is('Messages')")
     page.wait_for_selector("#pgtpl")
     page.fill("#pgtpl", "Hi {name}, quick question about r/{subreddit}?")
     page.click("#pg button:text-is('Save')")
     page.wait_for_selector("#pg pre.log:text-is('saved')")  # the save has finished, not just some "saved" on the page
-    page.click("#pg button:text-is('leads')")
-    page.click("#pg button:text-is('messages')")
+    page.click("#pg button:text-is('People')")
+    page.click("#pg button:text-is('Messages')")
     # the panel re-reads the server on every tab switch; wait for the settled value rather than a transient render
     page.wait_for_function("document.querySelector('#pgtpl') && document.querySelector('#pgtpl').value === 'Hi {name}, quick question about r/{subreddit}?'", timeout=15000)
 
     # Settings: change a setting and it persists
-    page.click("#pg button:text-is('settings')")
+    page.click("#pg button:text-is('Settings')")
     page.wait_for_selector("input[data-k='daily_dm_cap']")
     page.fill("input[data-k='daily_dm_cap']", "7")
     page.click("#pg button:text-is('Save settings')")
     page.wait_for_selector("#pg pre.log:text-is('saved')")  # the save has finished, not just some "saved" on the page
-    page.click("#pg button:text-is('leads')")
-    page.click("#pg button:text-is('settings')")
+    page.click("#pg button:text-is('People')")
+    page.click("#pg button:text-is('Settings')")
     page.wait_for_function("document.querySelector(\"input[data-k='daily_dm_cap']\") && document.querySelector(\"input[data-k='daily_dm_cap']\").value === '7'", timeout=15000)
 
     # Run: with no DeepSeek key or product, the refusal reaches the user instead of failing silently
-    page.click("#pg button:text-is('run')")
+    page.click("#pg button:text-is('Run')")
     page.wait_for_selector("#pgmode")
     page.click("#pg button:text-is('▶ Start')")
     page.wait_for_selector("#pg .err")
     assert any(w in page.inner_text("#pg .err") for w in ("DeepSeek key", "Set up the product"))
 
     # Brain and Setup tabs render from the live server
-    page.click("#pg button:text-is('brain')")
+    page.click("#pg button:text-is('Team activity')")
     page.wait_for_selector("text=Team memory")
-    page.click("#pg button:text-is('setup')")
+    page.click("#pg button:text-is('Product')")
     page.wait_for_selector("button:text-is('Analyze my product')")
 
     assert errors == [], errors

@@ -77,7 +77,7 @@ function render() {
   $("#app").innerHTML = `
   <header>
     <b>Loft</b>
-    <nav>${["profiles","team","activity"].concat(canAdmin() ? ["overview"] : []).map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</nav>
+    <nav>${["profiles","team","activity"].concat(canAdmin() ? ["overview"] : []).map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${NAV[t]}</button>`).join("")}</nav>
     <span class="sp"></span>
     ${teams.length ? `<select style="width:auto" onchange="act(()=>api('POST','/team/'+this.value))">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
     <span class="mute small">${esc(S.me.email)} · ${esc(S.device)}</span>
@@ -136,61 +136,93 @@ async function act(fn, btn) {
   finally { if (btn) btn.disabled = false; }
 }
 
-function status(p) {
-  if (p.running_here) return `<span class="pill run">running here</span>`;
-  if (p.running) return `<span class="pill busy">in use: ${esc(p.running.by)} @ ${esc(p.running.device)}</span>`;
-  return `<span class="mute small">${p.version ? "v" + p.version : "never run"}</span>`;
+// ---- plain-language helpers: one idea per screen, no jargon on the main path
+const NAV = { profiles: "Accounts", team: "Team", activity: "Activity", overview: "Overview" };
+const OPEN = new Set();   // <details> the person opened: the 3-second refresh redraws the page and must not close them
+const people = n => n === 1 ? "1 person" : n + " people", msgs = n => n === 1 ? "1 message" : n + " messages";
+const MODE = {};          // what each account's "Start Pigeon" will do, kept across redraws
+let HOW_SEEN = false;
+const det = (key, summary, body) => `<details ${OPEN.has(key) ? "open" : ""} ontoggle="this.open ? OPEN.add('${key}') : OPEN.delete('${key}')"><summary class="mute small" style="cursor:pointer">${summary}</summary>${body}</details>`;
+const MODE_WORDS = { find: "finding people", dm: "sending approved messages", full: "finding people and messaging them" };
+const JOB_WORDS = { scan: "adding the people on the page", replies: "checking for replies", doctor: "checking Reddit works", send: "sending a message",
+                    post: "posting a comment", submit: "posting", setup: "reading your product", discover: "finding subreddits" };
+function pigeonWords(pg) {
+  if (pg.state === "stopping") return "Pigeon is stopping…";
+  if (pg.state === "idle") return "Pigeon is off";
+  return "Pigeon is " + ((pg.job === "run" ? MODE_WORDS[pg.mode] : JOB_WORDS[pg.job]) || "working");
 }
-
-// Pigeon (Reddit agent) attached to an open session. Shown only while the profile is running on this machine.
-function pigeonRow(id, pg) {
-  const on = pg.state !== "idle";
-  const last = (pg.log || []).slice(-1)[0];
-  return `<div class="small" style="margin-top:6px"><span class="pill ${on ? "run" : ""}">🕊 Pigeon ${esc(pg.state)}${on && pg.mode ? " · " + esc(pg.mode) : ""}</span>
-    ${on ? `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'stop'}))">Stop</button>`
-         : `<select id="pm${id}" style="width:auto"><option value="find">find leads</option><option value="dm">send DMs</option><option value="full">find + DM</option></select>
-            <button class="b p" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'start',mode:$('#pm${id}').value}))">Attach Pigeon</button>`}
-    <button class="b" onclick="pgOpen(${id})">Open Pigeon</button>
-    <span class="mute"> ${pg.stats ? `scanned ${pg.stats.scanned} · leads ${pg.stats.leads} · DMs ${pg.stats.dms}` : ""}${pg.error ? " · " + esc(pg.error) : ""}</span>
-    ${last ? `<div class="log">${esc(last.msg)}</div>` : ""}</div>`;
+function friendlyError(msg) {
+  if (/proxy not working/i.test(msg)) return "This account's proxy isn't responding, so the browser was not opened (it would have used your own IP). Check the proxy in ⋯ → Edit.";
+  return msg;
+}
+function acct(p) {   // what is going on with this account, in one sentence
+  const j = job("run-" + p.id);
+  if (p.running_here) return { cls: "run", text: "Open on this computer", sub: j && j.pigeon ? pigeonWords(j.pigeon) : "Starting…" };
+  if (p.running) return { cls: "busy", text: `${p.running.by} is using it`, sub: "on " + p.running.device };
+  const err = j && !j.alive && j.log.find(l => /^error:/i.test(l));
+  if (err) return { cls: "", text: "Couldn't open", sub: "", err: err.replace(/^error:\s*/i, "") };
+  return { cls: "", text: p.version ? "Closed · saved" : "Not opened yet", sub: "" };
+}
+const net = p => p.proxy ? `<span class="mute small">Own proxy · ${esc(p.proxy.server.replace(/^[a-z0-9]+:\/\//i, ""))}</span>`
+                         : `<span class="small" style="color:var(--warn)">⚠ No proxy: uses your own IP</span>`;
+function actions(p, pg, busy) {
+  const id = p.id;
+  if (!p.running_here) return `<button class="b p" ${busy ? "disabled" : ""} onclick="act(()=>api('POST','/profiles/${id}/run'),this)">Open browser</button>`;
+  let h = "";
+  if (pg) {
+    h += pg.state !== "idle"
+      ? `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'stop'}))">Stop Pigeon</button>`
+      : `<select id="pm${id}" style="width:auto" title="What should Pigeon do?" onchange="MODE[${id}]=this.value">
+           ${[["find", "Find people (sends nothing)"], ["full", "Find people + message them"], ["dm", "Send approved messages"]].map(([v, t]) => `<option value="${v}" ${(MODE[id] || "find") === v ? "selected" : ""}>${t}</option>`).join("")}</select>
+         <button class="b p" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'start',mode:$('#pm${id}').value}))">Start Pigeon</button>`;
+    h += `<button class="b" onclick="pgOpen(${id})">Pigeon controls</button>`;
+  }
+  return h + `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/stop'),this)" title="Closes the browser and saves its cookies to the team">Close &amp; save</button>`;
 }
 
 function renderProfiles() {
   const ps = S.profiles.filter(p => !filter || (p.name + " " + p.tags.join(" ") + " " + p.notes).toLowerCase().includes(filter));
+  if (!HOW_SEEN) { HOW_SEEN = true; if (!S.profiles.some(p => p.version)) OPEN.add("how"); }
   $("#body").innerHTML = `
   <div class="toolbar">
-    <input id="q" style="max-width:280px" placeholder="Search name, tag, notes" value="${esc(filter)}"
+    <input id="q" style="max-width:280px" placeholder="Search accounts" value="${esc(filter)}"
       oninput="filter=this.value.toLowerCase();renderProfiles();const q=$('#q');q.focus();q.setSelectionRange(q.value.length,q.value.length)">
     <span class="sp"></span>
     <button class="b" onclick="importDlg()">Import</button>
-    <button class="b" onclick="bulkDlg()">Bulk create</button>
-    <button class="b p" onclick="newDlg()">New profile</button>
+    <button class="b" onclick="bulkDlg()">Add many</button>
+    <button class="b p" onclick="newDlg()">Add account</button>
   </div>
+  <div class="card pad" style="margin-bottom:12px">${det("how", "<b>How does this work?</b>", `<ol class="small" style="margin:8px 0 0;padding-left:18px">
+    <li><b>Open browser.</b> Each account has its own browser and its own proxy. The first time, sign in to Reddit in it.</li>
+    <li><b>Start Pigeon.</b> It finds people to talk to and writes the messages. Nothing is sent until you approve it, unless you turn that off.</li>
+    <li><b>Pigeon controls → People.</b> Read, edit and approve the messages. Then press Start again to send.</li>
+    <li><b>Close &amp; save.</b> Your login is saved (encrypted) so a teammate can open the same account later. Only one person can have an account open at a time.</li></ol>`)}</div>
   <div class="card"><table>
-    <tr><th>Name</th><th>OS</th><th>Proxy</th><th>Tags</th><th>Status</th><th></th></tr>
-    ${ps.map(row).join("") || `<tr><td colspan="6" class="mute">No profiles yet.</td></tr>`}
-  </table></div>
-  <p class="mute small">Each profile keeps one fingerprint for life. Its cookies and storage are end-to-end encrypted and sync when the browser closes. Only one person can run a profile at a time.</p>`;
+    <tr><th>Account</th><th>Status</th><th></th></tr>
+    ${ps.map(row).join("") || `<tr><td colspan="3" class="mute">No accounts yet. Press <b>Add account</b>.</td></tr>`}
+  </table></div>`;
 }
 function row(p) {
-  const j = job("run-" + p.id), busy = p.running || p.running_here, edit = p.access === "edit";
+  const j = job("run-" + p.id), busy = p.running || p.running_here, edit = p.access === "edit", a = acct(p);
+  const pg = p.running_here && j && j.pigeon;
+  const raw = j && j.log.length ? det("log" + p.id, "Details", `<div class="log">${esc(j.log.join("\n"))}</div>`) : "";
   return `<tr>
-    <td><b>${esc(p.name)}</b> <span class="mute small">#${p.id}</span>${p.notes ? `<div class="mute small">${esc(p.notes)}</div>` : ""}${j ? `<div class="log">${esc(j.log.join("\n"))}</div>` : ""}${j && j.pigeon ? pigeonRow(p.id, j.pigeon) : ""}</td>
-    <td>${esc(p.os)}<div class="mute small">canvas ${esc(p.canvas)}</div></td>
-    <td class="small">${p.proxy ? esc(p.proxy.server) : '<span class="mute">direct</span>'}</td>
-    <td class="small">${p.tags.map(t => `<span class="pill">${esc(t)}</span>`).join(" ")}</td>
-    <td>${status(p)}</td>
-    <td style="text-align:right;white-space:nowrap">
-      ${p.running_here ? `<button class="b" onclick="act(()=>api('POST','/profiles/${p.id}/stop'),this)">Stop &amp; sync</button>`
-        : `<button class="b p" ${busy ? "disabled" : ""} onclick="act(()=>api('POST','/profiles/${p.id}/run'),this)">Run</button>`}
+    <td><b>${esc(p.name)}</b>
+      <div>${net(p)} ${p.tags.map(t => `<span class="pill small">${esc(t)}</span>`).join(" ")}</div>
+      ${p.notes ? `<div class="mute small">${esc(p.notes)}</div>` : ""}
+      ${a.err ? `<div class="err small">${esc(friendlyError(a.err))}</div>` : ""}${raw}</td>
+    <td><span class="pill ${a.cls}" style="white-space:nowrap">${esc(a.text)}</span>${a.sub ? `<div class="small" style="margin-top:4px">${esc(a.sub)}</div>` : ""}
+      ${pg && pg.stats ? `<div class="mute small">found ${people(pg.stats.leads)} · sent ${msgs(pg.stats.dms)}</div>` : ""}</td>
+    <td><div class="row" style="justify-content:flex-end;flex-wrap:wrap">
+      ${actions(p, pg, busy)}
       ${S.runners.length ? `<button class="b" ${busy ? "disabled" : ""} onclick="cloud(${p.id},this)" title="Run on a cloud runner, view from any device">Cloud</button>` : ""}
       <span class="menu" id="m${p.id}"><button class="b" onclick="toggleMenu(${p.id},event)">⋯</button><div>
         ${edit ? `<button onclick="editDlg(${p.id})">Edit</button><button onclick="shareDlg(${p.id})">Share</button>` : ""}
         <button ${busy ? "disabled" : ""} onclick="cookieDlg(${p.id})">Import cookies</button>
         <button ${busy ? "disabled" : ""} onclick="exportCookies(${p.id})">Export cookies</button>
-        <button onclick="exportDlg(${p.id})">Export profile</button>
+        <button onclick="exportDlg(${p.id})">Export account</button>
         ${p.running && canAdmin() && !p.running_here ? `<button style="color:var(--bad)" onclick="if(confirm('Force-release the lock? Unsynced changes on the other device will be rejected.'))act(()=>api('POST','/profiles/${p.id}/unlock'))">Force unlock</button>` : ""}
-      </div></span>
+      </div></span></div>
     </td></tr>`;
 }
 function toggleMenu(id, e) { e.stopPropagation(); document.querySelectorAll(".menu.open").forEach(m => m.id !== "m" + id && m.classList.remove("open")); $("#m" + id).classList.toggle("open"); }
@@ -208,16 +240,17 @@ const osSel = (id, v, canvasId) => `<select id="${id}" ${canvasId ? `onchange="$
 const canvasSel = (id, v) => `<select id="${id}"><option value="noise" ${v!=="real"?"selected":""}>noise: random per read, works on any OS</option><option value="real" ${v==="real"?"selected":""}>real: this machine's rendering (same OS only)</option></select>`;
 
 function newDlg() {
-  dlg(`<h3>New profile</h3>
+  dlg(`<h3>Add an account</h3>
     ${S.templates.length ? `<label>Template</label><select id="n_tpl" onchange="applyTpl(this.value)"><option value="">none</option>${S.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>` : ""}
     <label>Name</label><input id="n_name">
-    <div class="grid2"><div><label>OS fingerprint</label>${osSel("n_os",S.host_os,"n_canvas")}</div><div><label>Canvas</label>${canvasSel("n_canvas","real")}</div></div>
-    <p class="mute small">Profiles with this machine's OS use real canvas and real fonts, which passes consistency checkers such as Pixelscan. Other OSes need canvas noise, and Pixelscan flags that.</p>
-    <label>Proxy (optional): scheme://user:pass@host:port</label><input id="n_proxy" placeholder="http://user:pass@1.2.3.4:8080">
+    <label>Proxy (strongly recommended: one per account): scheme://user:pass@host:port</label><input id="n_proxy" placeholder="http://user:pass@1.2.3.4:8080">
     <div class="mute small">Tip: for a proxynet gateway (or any session proxy), put <code>{pid}</code> in the username to give this browser its own sticky exit, e.g. <code>http://country-us-session-{pid}:PASS@gateway:8899</code>. Save it as a template to reuse.</div>
     <label>Start URL</label><input id="n_url" placeholder="https://">
     <label>Tags (comma separated)</label><input id="n_tags">
     <label>Notes</label><input id="n_notes">
+    <details style="margin-top:10px"><summary class="mute small" style="cursor:pointer">Advanced: browser identity (the defaults are right for most people)</summary>
+      <div class="grid2"><div><label>OS fingerprint</label>${osSel("n_os",S.host_os,"n_canvas")}</div><div><label>Canvas</label>${canvasSel("n_canvas","real")}</div></div>
+      <p class="mute small">An account that uses this machine's OS shows its real canvas and fonts, which passes checkers such as Pixelscan. Other OSes need canvas noise, and Pixelscan flags that.</p></details>
     <div class="row" style="margin-top:16px"><button class="b p" id="n_go" onclick="createProfile()">Create</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }
 function applyTpl(id) {
@@ -236,7 +269,7 @@ async function createProfile() {
 }
 
 function bulkDlg() {
-  dlg(`<h3>Bulk create</h3>
+  dlg(`<h3>Add many accounts</h3>
     <div class="grid2"><div><label>How many</label><input id="b_n" type="number" value="10" min="1" max="500"></div><div><label>Name pattern ({n} = number)</label><input id="b_name" value="Profile {n}"></div></div>
     <div class="grid2"><div><label>OS fingerprint</label>${osSel("b_os",S.host_os,"b_canvas")}</div><div><label>Canvas</label>${canvasSel("b_canvas","real")}</div></div>
     <label>Proxies, one per line, assigned round-robin (optional)</label><textarea id="b_px" placeholder="http://user:pass@1.2.3.4:8080"></textarea>
@@ -467,6 +500,27 @@ const pgApi = (path, body) => api("POST", `/profiles/${PG.id}/pigeon/${path}`, b
 const pgOp = (op, args) => pgApi("op", { op, args: args || {} });
 const pgJob = (kind, args) => pgApi("job", { kind, args: args || {} });
 const pgTabs = ["leads", "run", "comments", "messages", "setup", "settings", "brain"];
+const PG_LABEL = { leads: "People", run: "Run", comments: "Comments", messages: "Messages", setup: "Product", settings: "Settings", brain: "Team activity" };
+const LEAD_WORDS = { queued: "waiting for a message", draft: "needs your approval", ready: "approved", sent: "sent", replied: "replied", failed: "failed", skipped: "skipped" };
+const SETTING_LABELS = { model: "AI model", my_username: "This account's Reddit username", daily_dm_cap: "Max messages per day", warmup: "Start slowly (warm-up)",
+  active_start: "Only work from this hour (0-23)", active_end: "Only work until this hour (0-23)", min_gap_sec: "Shortest wait between messages (seconds)",
+  max_gap_sec: "Longest wait between messages (seconds)", pace: "Speed (1 = normal, lower = slower)", min_fit: "Minimum match score (0-100)",
+  session_minutes: "How long each run lasts (minutes)", upvotes: "Upvote posts while browsing", max_upvotes_per_session: "Max upvotes per run",
+  dm_mode: "How messages are written (ai or template)", approve_ai_drafts: "I approve AI-written messages first", ai_guidance: "Extra instructions for the AI",
+  use_team_setup: "Use the team's shared setup", auto_check_replies: "Check for replies automatically", posts_per_day: "Max posts per day" };
+function pgNext(busy) {   // the one thing to do next, in a sentence
+  const st = PG.st; if (!st) return "";
+  const n = k => (st.leads && st.leads[k]) || 0;
+  let msg, go = null;
+  if (st.state === "stopping") msg = "Stopping… the browser stays open.";
+  else if (busy) msg = "Pigeon is working in its own tab. You can keep using the browser. Nothing for you to do.";
+  else if (!st.product) { msg = "<b>Start here:</b> tell Pigeon what you're promoting, so it knows who to look for."; go = ["setup", "Go to Product"]; }
+  else if (n("draft")) { msg = `<b>${n("draft")} message${n("draft") > 1 ? "s are" : " is"} waiting for you.</b> Read them and press Approve.`; go = ["leads", "Review messages"]; }
+  else if (n("ready")) { msg = `<b>${n("ready")} approved message${n("ready") > 1 ? "s are" : " is"} ready.</b> Press Start (mode: send approved messages) to send them.`; go = ["run", "Go to Run"]; }
+  else if (!st.stats.leads) { msg = "<b>Next:</b> press Start to find people to message."; go = ["run", "Go to Run"]; }
+  else msg = "All caught up. Press Start on the Run tab to find more people.";
+  return `<div class="banner" style="margin:0 0 10px"><div>${msg}</div><span class="sp"></span>${go ? `<button class="b p" onclick="pgTab('${go[0]}')">${go[1]}</button>` : ""}</div>`;
+}
 
 function pgOpen(id) {
   PG = { id, tab: "leads", filter: "all", msg: "", edit: {} };
@@ -514,18 +568,20 @@ async function pgRefresh(force) {
 function pgBar() {
   const st = PG.st, el = $("#pgbar"); if (!el || !st) return;
   const on = st.state !== "idle", last = (st.log || []).slice(-1)[0];
-  el.innerHTML = `<span class="pill ${on ? "run" : ""}">🕊 ${esc(st.state)}${on && st.job ? " · " + esc(st.job) + (st.mode ? " " + esc(st.mode) : "") : ""}</span>
+  el.innerHTML = `<span class="pill ${on ? "run" : ""}">🕊 ${esc(pigeonWords(st))}</span>
     ${on ? `<button class="b d" onclick="pgGo(()=>pgApi('stop'),'stopping…')">Stop</button>` : ""}
-    <span class="mute small"> scanned ${st.stats.scanned} · leads ${st.stats.leads} · DMs ${st.stats.dms} · today ${st.daily.count} · team brain ${st.central ? "on" : "OFF"}</span>
+    <span class="mute small"> looked at ${st.stats.scanned} · found ${people(st.stats.leads)} · sent ${msgs(st.stats.dms)} · ${st.daily.count} today${st.central ? " · team history: on" : ""}</span>
+    ${st.central ? "" : `<div class="err small">Team history is OFF: this account can't see who your other accounts already messaged.</div>`}
     ${last ? `<div class="log">${esc(last.msg)}</div>` : ""}
     ${st.last && !st.last.ok && st.last.error ? `<div class="err small">${esc(st.last.kind)}: ${esc(st.last.error)}</div>` : ""}`;
 }
 
 function pgRender() {
   const busy = PG.st && PG.st.state !== "idle";
-  $("#pg").innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Pigeon · profile ${PG.id}</h3><button class="b" onclick="$('#dlg').close()">Close</button></div>
+  $("#pg").innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">Pigeon · ${esc((S.profiles.find(p => p.id === PG.id) || {}).name || "account " + PG.id)}</h3><button class="b" onclick="$('#dlg').close()">Close</button></div>
     <div id="pgbar" style="margin:8px 0"></div>
-    <div class="row" style="gap:4px;margin-bottom:10px">${pgTabs.map(t => `<button class="b ${PG.tab === t ? "p" : ""}" onclick="pgTab('${t}')">${t}</button>`).join("")}</div>
+    ${pgNext(busy)}
+    <div class="row" style="gap:4px;margin-bottom:10px;flex-wrap:wrap">${pgTabs.map(t => `<button class="b ${PG.tab === t ? "p" : ""}" onclick="pgTab('${t}')">${PG_LABEL[t]}</button>`).join("")}</div>
     ${PG.err ? `<div class="err small">${esc(PG.err)}</div>` : ""}${PG.msg ? `<pre class="log">${esc(PG.msg)}</pre>` : ""}
     <div>${({ leads: pgLeads, run: pgRun, comments: pgComments, messages: pgMessages, setup: pgSetup, settings: pgSettings, brain: pgBrain })[PG.tab](busy)}</div>`;
   pgBar();
@@ -535,14 +591,14 @@ function pgLeads(busy) {
   const L = PG.leads || [], shown = L.filter(l => PG.filter === "all" || l.status === PG.filter);
   const sts = ["all", "queued", "draft", "ready", "sent", "replied", "failed", "skipped"];
   return `<div class="row" style="margin-bottom:8px">
-    <select onchange="PG.filter=this.value;pgRender()">${sts.map(s => `<option ${PG.filter === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+    <select onchange="PG.filter=this.value;pgRender()">${sts.map(s => `<option value="${s}" ${PG.filter === s ? "selected" : ""}>${s === "all" ? "everyone" : LEAD_WORDS[s]}</option>`).join("")}</select>
     <button class="b" onclick="pgGo(()=>pgOp('lead_write',{all:true}))">Write all queued</button>
     <button class="b" onclick="pgGo(()=>pgOp('lead_approve',{all:true}))">Approve all drafts</button>
     <button class="b" onclick="pgExport()">Export CSV</button>
     <button class="b d" onclick="if(confirm('Delete ALL leads?'))pgGo(()=>pgOp('leads_clear'))">Clear all</button></div>
   ${shown.slice(0, 100).map(l => { const u = esc(l.username), sent = l.status === "sent" || l.status === "replied";
     return `<div class="card" style="padding:10px;margin-bottom:8px"><div class="row"><a href="https://www.reddit.com/user/${u}" target="_blank"><b>u/${u}</b></a>
-      <span class="pill">${l.fit}</span><span class="pill">${esc(l.status)}</span><span class="mute small">${l.subreddit ? "r/" + esc(l.subreddit) : ""}</span></div>
+      <span class="pill">${l.fit}</span><span class="pill">${esc(LEAD_WORDS[l.status] || l.status)}</span><span class="mute small">${l.subreddit ? "r/" + esc(l.subreddit) : ""}</span></div>
       <div class="small mute">${esc(l.reason)}${l.error ? ` <span class="err">· ${esc(l.error)}</span>` : ""}</div>
       ${l.message || PG.edit[l.username] != null ? `<textarea style="width:100%;min-height:70px" ${sent ? "disabled" : ""} oninput="PG.edit['${u}']=this.value">${esc(PG.edit[l.username] ?? l.message)}</textarea>` : ""}
       <div class="row" style="margin-top:6px">
@@ -552,7 +608,7 @@ function pgLeads(busy) {
         ${l.status === "draft" || l.status === "ready" ? `<button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('send',{username:'${u}'}),'sending…')">Send now</button>` : ""}
         ${l.status === "sent" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_replied',{username:'${u}'}))">Mark replied</button>` : ""}
         ${!sent && l.status !== "skipped" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_skip',{username:'${u}'}))">Skip</button>` : ""}</div></div>`; }).join("") || `<div class="mute">No leads here. Run the agent in “find” mode, scan a page, or import a list.</div>`}
-  <h4>List DMer</h4><div class="mute small">Usernames, one per line (or a CSV with usernames in the first column). People the team already contacted are skipped.</div>
+  <h4>Add people by username</h4><div class="mute small">One username per line. People your team already contacted are skipped.</div>
   <textarea id="pgimp" style="width:100%;min-height:60px"></textarea>
   <button class="b" onclick="pgGo(()=>pgOp('leads_import',{text:$('#pgimp').value}))">Import to queue</button>`;
 }
@@ -563,17 +619,17 @@ async function pgExport() {
 }
 
 function pgRun(busy) {
-  return `<div class="card" style="padding:12px"><b>Run the agent</b><div class="row" style="margin-top:8px">
-      <select id="pgmode"><option value="find">find leads</option><option value="dm">send approved DMs</option><option value="full">find + DM</option></select>
-      <input id="pgmin" type="number" placeholder="minutes (default from settings)" style="width:200px">
+  return `<div class="card" style="padding:12px"><b>Start Pigeon</b><div class="row" style="margin-top:8px">
+      <select id="pgmode"><option value="find">Find people (sends nothing)</option><option value="dm">Send approved messages</option><option value="full">Find people + message them</option></select>
+      <input id="pgmin" type="number" placeholder="how many minutes (optional)" style="width:200px">
       <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('run',{mode:$('#pgmode').value,minutes:parseFloat($('#pgmin').value)||null}),'started')">▶ Start</button></div>
       <div class="mute small" style="margin-top:6px">The agent works in its own tab; your tabs are left alone. DMs and comments go through the daily cap and the team's shared memory.</div></div>
-    <div class="card" style="padding:12px;margin-top:10px"><b>Page DMer</b><div class="mute small">Queue everyone on the Reddit tab you're looking at.</div>
+    <div class="card" style="padding:12px;margin-top:10px"><b>Add the people on this page</b><div class="mute small">Adds everyone on the Reddit page you're looking at to the list.</div>
       <label class="small"><input type="checkbox" id="pgns"> skip AI scoring</label>
       <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('scan',{no_score:$('#pgns').checked}),'scanning…')">Queue everyone on this page</button></div>
     <div class="card" style="padding:12px;margin-top:10px"><button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('replies'),'checking…')">Check replies</button></div>
-    <div class="card" style="padding:12px;margin-top:10px"><b>Reddit compatibility check</b>
-      <div class="mute small">Read-only: visits a feed, a post, a profile, the chat list and the submit page, and reports what Pigeon can't read. Run it first on a new account.</div>
+    <div class="card" style="padding:12px;margin-top:10px"><b>Check that Reddit works with Pigeon</b>
+      <div class="mute small">Safe: it only looks, it sends nothing. Run it once on a new account.</div>
       <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('doctor'),'checking Reddit… (the report appears here)')">Run the check</button>
       ${PG.st && PG.st.last && PG.st.last.kind === "doctor" && PG.st.last.out ? `<pre class="log">${esc(PG.st.last.out)}</pre>` : ""}</div>`;
 }
@@ -622,7 +678,7 @@ function pgSetup(busy) {
 function pgSettings() {
   const s = PG.settings || {};
   return `<div style="display:grid;grid-template-columns:240px 1fr;gap:6px;max-width:560px">${Object.entries(s).filter(([k]) => k !== "warmup_start").map(([k, v]) =>
-    `<label class="small">${esc(k)}</label>${typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v)}">`}`).join("")}</div>
+    `<label class="small">${esc(SETTING_LABELS[k] || k)}</label>${typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v)}">`}`).join("")}</div>
     <div class="row" style="margin-top:10px"><button class="b p" onclick="pgSaveSettings()">Save settings</button>
       <button class="b" onclick="pgGo(()=>pgOp('settings_set',{restart_warmup:true}),'warm-up restarted from today')">Restart warm-up from today</button></div>
     <div class="mute small" style="margin-top:6px">The DeepSeek key stays on this machine: <code>loft pigeon config --deepseek-key KEY</code>.</div>`;

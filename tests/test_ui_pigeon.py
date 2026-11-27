@@ -69,49 +69,49 @@ def test_panel_renders_every_tab_and_sends_the_right_calls():
         page.route("http://loft.test/api/**", api)
         page.route("http://loft.test/", lambda r: r.fulfill(content_type="text/html", body=UI))
         page.goto("http://loft.test/")
-        page.wait_for_selector("text=Open Pigeon")
-        page.click("text=Open Pigeon")
+        page.wait_for_selector("button:text-is('Pigeon controls')")
+        page.click("button:text-is('Pigeon controls')")
         page.wait_for_selector("#pg h3")
 
         def text():
             page.wait_for_timeout(300)
             return page.inner_text("#pg")
 
-        assert "u/alice" in text() and "team brain on" in text()
+        assert "u/alice" in text() and "team history: on" in text()
         assert "Hey alice" in page.input_value("#pg textarea")  # the draft is editable text
         page.click("#pg button:text-is('Approve')")
         page.click("#pg button:text-is('Send now')")
         page.click("#pg button:text-is('Skip')")
 
-        page.click("#pg button:text-is('run')")
-        assert "Page DMer" in text()
+        page.click("#pg button:text-is('Run')")
+        assert "Add the people on this page" in text()
         page.select_option("#pgmode", "full")
         page.click("#pg button:text-is('▶ Start')")
         page.click("#pg button:text-is('Queue everyone on this page')")
         page.click("#pg button:text-is('Check replies')")
         page.click("#pg button:text-is('Run the check')")
 
-        page.click("#pg button:text-is('comments')")
+        page.click("#pg button:text-is('Comments')")
         assert "Start where buyers complain" in text() and "What I learned" in text()
         page.click("#pg button:text-is('Approve & post')")
         assert "An earlier post" in text()  # posts the agent already submitted
         page.click("#pg button:text-is('Submit now')")
         page.click("#pg button:text-is('I posted it myself')")
 
-        page.click("#pg button:text-is('messages')")
+        page.click("#pg button:text-is('Messages')")
         assert "Undo AI spin" in text()
         page.click("#pg button:text-is('✨ Add spintax with AI')")
 
-        page.click("#pg button:text-is('setup')")
+        page.click("#pg button:text-is('Product')")
         assert "Acme" in text() and "r/saas" in text()
         page.click("#pg input[type=checkbox]")  # toggle the subreddit off
         page.click("#pg button:text-is('Re-run discovery')")
 
-        page.click("#pg button:text-is('settings')")
-        assert "daily_dm_cap" in text()
+        page.click("#pg button:text-is('Settings')")
+        assert "Max messages per day" in text()
         page.click("#pg button:text-is('Save settings')")
 
-        page.click("#pg button:text-is('brain')")
+        page.click("#pg button:text-is('Team activity')")
         t = text()
         assert "3 DMs" in t and "acct-a" in t and "u/acct_a_reddit" in t and "team_dm_per_day=40" in t and "team setup v2" in t
         page.click("#pg button:text-is('Pull team setup')")
