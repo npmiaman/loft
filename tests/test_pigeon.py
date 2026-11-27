@@ -625,5 +625,5 @@ def test_vendored_content_script_matches_the_extension_build():
     built = Path(__file__).parent.parent.parent / ".output" / "chrome-mv3" / "content-scripts" / "reddit.js"
     if not built.exists():
         pytest.skip("extension build not found next to pigeon/")
-    vendored = Path(__file__).parent.parent / "pigeon" / "pigeon" / "assets" / "reddit.js"
+    vendored = Path(__file__).parent.parent / "pigeon" / "agent" / "assets" / "reddit.js"
     assert vendored.read_bytes() == built.read_bytes(), "stale vendored script: run `npm run sync:pigeon` in the extension repo"
