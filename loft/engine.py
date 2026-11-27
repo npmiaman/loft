@@ -612,9 +612,9 @@ def run_profile(client: Client, pid: int, *, headless: bool = False,
     return result
 
 
-def request_stop(pid: int, home: Path = PROFILES) -> None:
+def request_stop(pid: int, home: Optional[Path] = None) -> None:
     """Ask a running `loft run` (any process on this machine) to close and sync."""
-    root = LocalProfile(pid, home).root
+    root = LocalProfile(pid, home or PROFILES).root  # PROFILES is read now, not when this module loaded (it can be re-pointed)
     root.mkdir(parents=True, exist_ok=True)
     (root / "stop").touch()
 

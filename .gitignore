@@ -7,3 +7,6 @@ dist/
 *.loftprofile
 
 dist/
+
+# built Next.js UI (made by `npm run build` in web/)
+loft/web_ui/

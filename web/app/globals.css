@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Design tokens. Calm neutrals, one green accent, black primary: light and dark. Components use these names (bg-card, text-mute, border-line…). */
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-bg: var(--bg); --color-side: var(--side); --color-card: var(--card); --color-ink: var(--ink); --color-ink2: var(--ink2);
+  --color-mute: var(--mute); --color-line: var(--line); --color-line2: var(--line2); --color-hover: var(--hover); --color-acc: var(--acc);
+  --color-ok: var(--ok); --color-warn: var(--warn); --color-bad: var(--bad); --color-ok-bg: var(--ok-bg); --color-warn-bg: var(--warn-bg);
+  --color-bad-bg: var(--bad-bg); --color-on-ink: var(--on-ink);
+  --shadow-pop: var(--pop); --shadow-card: var(--shadow);
+  --animate-pop: pop .16s ease; --animate-fade: fade .16s ease; --animate-slide: slide .26s cubic-bezier(.2,.8,.2,1);
+}
+:root {
+  --bg:#fff; --side:#f7f7f8; --card:#fff; --ink:#0d0d0d; --ink2:#353740; --mute:#6e6e80; --line:#ececf1; --line2:#d9d9e3; --hover:#f4f4f6;
+  --acc:#10a37f; --ok:#10a37f; --warn:#b54708; --bad:#d92d20; --on-ink:#fff; --ok-bg:#ecfdf5; --warn-bg:#fffaeb; --bad-bg:#fef3f2;
+  --shadow:0 1px 2px rgba(16,24,40,.05); --pop:0 12px 32px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06); color-scheme:light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#151516; --side:#101011; --card:#1b1b1d; --ink:#ececf1; --ink2:#c5c5d2; --mute:#9b9ba8; --line:#2a2a2e; --line2:#3b3b41; --hover:#242428;
+    --acc:#19c37d; --ok:#19c37d; --warn:#f5a623; --bad:#f97066; --on-ink:#0d0d0d; --ok-bg:#10261d; --warn-bg:#2a2012; --bad-bg:#2c1816;
+    --shadow:none; --pop:0 12px 32px rgba(0,0,0,.55); color-scheme:dark;
+  }
+}
+@keyframes pop { from { opacity:0; transform:translateY(6px) scale(.985); } }
+@keyframes fade { from { opacity:0; } }
+@keyframes slide { from { transform:translateX(48px); opacity:0; } }
+
+@layer base {
+  html { -webkit-text-size-adjust:100%; }
+  body { @apply bg-bg text-ink font-sans antialiased; font-size:14px; line-height:1.5; letter-spacing:-.003em; }
+  button, [role="button"] { cursor:pointer; }
+  button:disabled { cursor:not-allowed; }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:6px; }
+  ::selection { background: color-mix(in srgb, var(--acc) 28%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }

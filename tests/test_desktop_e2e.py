@@ -60,7 +60,7 @@ def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("dialog", lambda d: d.accept())
-    page.goto(url)
+    page.goto(url + "/legacy/")  # the classic page; the new Next.js UI has its own test (test_web_e2e.py)
 
     # sign up, create a team, create a profile with the canvas choice, all through the UI
     page.fill("#srv", loft_server)

@@ -30,6 +30,7 @@ from . import control
 from .client import Client, LoftError, load_config, save_config
 
 UI = Path(__file__).with_name("ui.html")
+WEB = Path(__file__).with_name("web_ui")  # the Next.js app (a static export): `npm run build` in web/ copies it here
 
 
 def api_key() -> str:
@@ -221,6 +222,12 @@ def make_app() -> FastAPI:
     # ------------------------------------------------------------ UI
     @app.get("/", response_class=HTMLResponse)
     def index():
+        page = WEB / "index.html"  # the new UI when it has been built; the classic page otherwise
+        return (page if page.exists() else UI).read_text(encoding="utf-8")
+
+    @app.get("/legacy", response_class=HTMLResponse)
+    @app.get("/legacy/", response_class=HTMLResponse)
+    def legacy():
         return UI.read_text(encoding="utf-8")
 
     @app.get("/api/state")
@@ -568,6 +575,9 @@ def make_app() -> FastAPI:
     def v1_cloud(pid: int, body: Optional[dict] = None):
         return cloud(pid, body or {})
 
+    if (WEB / "_next").is_dir():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/_next", StaticFiles(directory=WEB / "_next"), name="next-assets")
     return app
 
 

@@ -7,6 +7,9 @@ from PyInstaller.utils.hooks import collect_all
 
 datas, binaries, hidden = [("../loft/ui.html", "loft"), ("../loft/viewer.html", "loft"),
                             ("../loft/pigeon/assets", "loft/pigeon/assets")], [], []  # Pigeon's content script + shim
+import os
+if os.path.isdir("../loft/web_ui"):  # the Next.js UI, built beforehand with `npm run build` in web/
+    datas.append(("../loft/web_ui", "loft/web_ui"))
 for pkg in ("camoufox", "playwright", "fpgen", "language_tags", "ua_parser", "uvicorn", "webview"):
     try:
         d, b, h = collect_all(pkg)

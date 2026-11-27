@@ -33,6 +33,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["loft"]
+# The built Next.js UI is gitignored (hatch honours that), so include it explicitly when it has been built.
+artifacts = ["loft/web_ui/**"]
 
 [tool.uv]
 # Local dev and the test suite need everything: browser, server drivers, moto.
