@@ -1,0 +1,41 @@
+{
+  "name": "pigeon-reddit-agent",
+  "description": "Pigeon — a cursor-driven Reddit outreach agent (Chrome extension)",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/vendor-ocr.mjs",
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox --mv3",
+    "prebuild": "node scripts/vendor-ocr.mjs",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox --mv3",
+    "build:firefox:testbridge": "wxt build -b firefox --mv3 -m testbridge",
+    "sync:pigeon": "wxt build && cp .output/chrome-mv3/content-scripts/reddit.js loft/pigeon/agent/assets/reddit.js",
+    "sync:loft": "npm run sync:pigeon",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox --mv3",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/vendor-ocr.mjs && wxt prepare",
+    "test:logic": "tsx tests/logic.test.ts",
+    "test:e2e": "node tests/e2e/run.mjs && node tests/e2e/human.mjs && node tests/e2e/ui.mjs && node tests/e2e/agent.mjs && node tests/e2e/warmup.mjs && node tests/e2e/phase0.mjs && node tests/e2e/phase3.mjs"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "pdfjs-dist": "^6.5.438",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.8",
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0",
+    "@wxt-dev/module-react": "^1.2.2",
+    "playwright": "^1.65.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wxt": "^0.21.5"
+  }
+}
