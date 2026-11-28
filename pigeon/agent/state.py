@@ -62,6 +62,12 @@ class State:
         self.daily = d.get("daily") or dict(date=_today(), count=0, posts=0, next_dm_at=0.0, paused_until=0.0)
         self.stats = d.get("stats") or dict(scanned=0, leads=0, upvotes=0, dms=0, errors=0, posts=0)
         self.logs: list[dict] = d.get("log", [])
+        # everyone this account ever messaged (lower-cased username -> when). Clearing leads never removes anyone from it,
+        # so the agent can't queue or message the same person twice even after the list is wiped.
+        self.contacted: dict[str, float] = d.get("contacted", {})
+        for l in self.leads.values():
+            if l.get("status") in ("sent", "replied"):
+                self.contacted.setdefault(l["username"].lower(), l.get("sent_at") or l.get("created_at") or 0.0)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +76,7 @@ class State:
             settings=self.settings, product=self.product, subreddits=self.subreddits, templates=self.templates,
             leads=self.leads, opportunities=self.opportunities, post_ideas=self.post_ideas, posted=self.posted,
             template_undo=self.template_undo, team_version=self.team_version, daily=self.daily, stats=self.stats,
-            log=self.logs[-300:]), indent=1))
+            contacted=self.contacted, log=self.logs[-300:]), indent=1))
         tmp.replace(self.path)
 
     # ---- log ---------------------------------------------------------------------------------
@@ -97,13 +103,25 @@ class State:
 
     def put_lead(self, lead: dict) -> None:
         self.leads[lead["username"].lower()] = lead
+        self._note_contact(lead)
         self.save()
 
     def patch_lead(self, username: str, **patch) -> None:
         cur = self.get_lead(username)
         if cur is not None:
             cur.update(patch)
+            self._note_contact(cur)
             self.save()
+
+    def _note_contact(self, lead: dict) -> None:
+        if lead.get("status") in ("sent", "replied"):
+            self.contacted.setdefault(lead["username"].lower(), lead.get("sent_at") or time.time())
+
+    def was_contacted(self, username: str) -> bool:
+        """True if this account ever messaged them, whether or not they are still in the lead list."""
+        u = username.lower()
+        l = self.leads.get(u)
+        return u in self.contacted or bool(l and l.get("status") in ("sent", "replied"))
 
     def list_leads(self) -> list[dict]:
         return sorted(self.leads.values(), key=lambda l: (-l["fit"], -l["created_at"]))

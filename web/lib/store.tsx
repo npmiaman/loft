@@ -11,6 +11,10 @@ type Ctx = {
   act: (fn: () => Promise<unknown>, ok?: string) => Promise<boolean>;
   canAdmin: boolean;
   profile: (id: number) => Profile | undefined;
+  /** The app stopped answering after it had loaded (it crashed, or was closed). The UI shows a banner and disables actions. */
+  offline: string | null;
+  /** Run `cb` after every successful poll (pages that fetch their own data use it to stay fresh). Returns an unsubscribe. */
+  onPoll: (cb: () => void) => () => void;
 };
 const PigeonCtx = React.createContext<Ctx | null>(null);
 export const usePigeon = () => React.useContext(PigeonCtx)!;
@@ -20,6 +24,8 @@ export function PigeonProvider({ children }: { children: (s: PigeonState | null,
   const [s, setS] = React.useState<PigeonState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const last = React.useRef("");
+  const listeners = React.useRef(new Set<() => void>());
+  const onPoll = React.useCallback((cb: () => void) => { listeners.current.add(cb); return () => { listeners.current.delete(cb); }; }, []);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -27,6 +33,7 @@ export function PigeonProvider({ children }: { children: (s: PigeonState | null,
       const j = JSON.stringify(n);
       if (j !== last.current) { last.current = j; setS(n); }
       setError(null);
+      listeners.current.forEach((cb) => cb());
     } catch (e) { setError((e as Error).message); }
   }, []);
 
@@ -44,10 +51,10 @@ export function PigeonProvider({ children }: { children: (s: PigeonState | null,
   }, [refresh]);
 
   const value = React.useMemo<Ctx | null>(() => s && ({
-    s, refresh, act,
+    s, refresh, act, offline: error, onPoll,
     canAdmin: s.role === "owner" || s.role === "admin",
     profile: (id: number) => s.profiles?.find((p) => p.id === id),
-  }), [s, refresh, act]);
+  }), [s, refresh, act, error, onPoll]);
 
   return <PigeonCtx.Provider value={value as Ctx}>{children(s, error, refresh)}</PigeonCtx.Provider>;
 }

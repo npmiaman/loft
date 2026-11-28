@@ -99,7 +99,7 @@ def test_lead_lifecycle_ops(tmp_path):
     c.st.put_lead(dict(lead("alice", status="queued"), message=None))
     c.st.put_lead(dict(lead("bob", status="queued"), message=None, snippet=""))
     r = ops.run_state_op(c, "lead_write", dict(all=True))
-    assert r["written"] == 2 and c.st.get_lead("alice")["status"] == "ready"  # template mode needs no approval
+    assert r["written"] == 2 and c.st.get_lead("alice")["status"] == "draft"  # every message waits for approval, template ones too
     assert "alice" in c.st.get_lead("alice")["message"] or "saas" in c.st.get_lead("alice")["message"]
 
     c.st.settings["dm_mode"] = "ai"
@@ -287,10 +287,11 @@ def test_every_feature_inside_one_live_session(mock_context, tmp_path, fast, tea
             op("subs_edit", enable=["saas"])
             job("scan", no_score=True)                                               # Page DMer on the tab you have open
             seen["after_scan"] = sorted(l["username"] for l in op("leads_list")["leads"])
-            op("lead_write", all=True)                                               # Write messages (template mode: ready)
+            op("lead_write", all=True)                                               # Write messages (they wait for approval)
             op("lead_skip", username="sam_k")
             op("leads_import", text="newperson1\nfounder_amy")                       # List DMer
-            job("send", username="dev_bob")                                          # Send now
+            op("lead_approve", username="dev_bob")                                   # Approve, then Send now
+            job("send", username="dev_bob")
             seen["bob"] = op("leads_list", status="sent")["leads"]
             job("post", id="/r/saas/comments/p1/t1/")                                # Approve & post a comment
             op("ideas_generate")                                                     # Post ideas, then record one as posted
@@ -319,7 +320,7 @@ def test_every_feature_inside_one_live_session(mock_context, tmp_path, fast, tea
 
     final = State(state_path(pid, tmp_path))
     assert final.product["name"] == "Acme" and final.get_lead("sam_k")["status"] == "skipped"
-    assert final.get_lead("founder_amy")["status"] == "ready" and final.get_lead("newperson1")["status"] == "queued"
+    assert final.get_lead("founder_amy")["status"] == "draft" and final.get_lead("newperson1")["status"] == "queued"
     assert final.opportunities[0]["status"] == "posted" and len(final.post_ideas) == 4
     assert final.get_lead("dev_bob")["message"].startswith(("Hey", "Hi", "Hello")) and "dev_bob" in final.get_lead("dev_bob")["message"]
     # the whole thing is on the team's shared record

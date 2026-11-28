@@ -2,102 +2,321 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Pigeon · cloud profile</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cloud browser · Pigeon</title>
 <style>
-  :root { --bg:#0f1115; --bar:#171a21; --ink:#e7e9ee; --mute:#9aa1ad; --line:#272b35; --acc:#5b8cff; --bad:#f87171; }
+  :root { --bg:#151516; --bar:#1b1b1d; --card:#1b1b1d; --ink:#ececf1; --mute:#9b9ba8; --line:#2a2a2e; --line2:#3b3b41; --hover:#242428;
+          --acc:#19c37d; --bad:#f97066; --btn:#242428; --pop:0 12px 32px rgba(0,0,0,.55); color-scheme:dark; }
   * { box-sizing:border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .bar { display:flex; gap:6px; align-items:center; padding:6px 8px; background:var(--bar); border-bottom:1px solid var(--line); }
-  button { font:inherit; background:#22262f; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:5px 9px; cursor:pointer; min-width:34px; }
-  button.stop { color:var(--bad); }
-  input { font:inherit; flex:1; min-width:0; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
-  .tabs { display:flex; gap:4px; overflow-x:auto; padding:4px 8px; background:var(--bar); border-bottom:1px solid var(--line); }
-  .tab { white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis; font-size:12px; padding:3px 8px; border-radius:6px; border:1px solid var(--line); cursor:pointer; color:var(--mute); }
-  .tab.on { color:var(--ink); border-color:var(--acc); }
-  #stage { position:relative; height:calc(100% - 120px); overflow:auto; display:flex; justify-content:center; align-items:flex-start; outline:none; }
-  #screen { max-width:100%; height:auto; touch-action:pan-y; user-select:none; -webkit-user-select:none; cursor:default; }
-  #status { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--mute); }
-  .kb { display:flex; gap:6px; padding:6px 8px; background:var(--bar); border-top:1px solid var(--line); position:fixed; bottom:0; left:0; right:0; }
-  .name { color:var(--mute); font-size:12px; white-space:nowrap; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .app { display:flex; flex-direction:column; height:100vh; height:100dvh;
+         padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  button { font:inherit; background:var(--btn); color:var(--ink); border:1px solid var(--line2); border-radius:8px; padding:4px 10px;
+           cursor:pointer; min-width:34px; min-height:34px; touch-action:manipulation; }
+  button:hover { background:var(--hover); }
+  button:disabled { opacity:.55; cursor:not-allowed; }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  button.stop { color:var(--bad); white-space:nowrap; }
+  input { font:inherit; font-size:16px; flex:1; min-width:0; background:var(--bg); color:var(--ink); border:1px solid var(--line2); border-radius:8px; padding:6px 10px; min-height:34px; }
+  .bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:6px 8px; background:var(--bar); border-bottom:1px solid var(--line); flex:none; }
+  .bar form { flex:1; display:flex; min-width:0; }
+  .name { color:var(--mute); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:30vw; }
+  .tabs { display:flex; gap:4px; overflow-x:auto; padding:4px 8px; background:var(--bar); border-bottom:1px solid var(--line); flex:none; scrollbar-width:none; }
+  .tabw { display:flex; flex:none; border:1px solid var(--line2); border-radius:8px; overflow:hidden; }
+  .tabw.on { border-color:var(--acc); }
+  .tabw button { border:0; border-radius:0; background:none; min-height:30px; font-size:12px; }
+  .tab { max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--mute); text-align:left; }
+  .tabw.on .tab { color:var(--ink); }
+  .tabx { color:var(--mute); padding:0 8px; min-width:30px; }
+  .tabs > button { min-height:30px; font-size:12px; flex:none; }
+  #stage { position:relative; flex:1 1 auto; min-height:0; overflow:auto; outline:none; touch-action:pinch-zoom; overscroll-behavior:contain; }
+  #screen { display:block; margin:0 auto; max-width:100%; height:auto; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; cursor:default; }
+  #stage.z100 #screen, #stage.z150 #screen { max-width:none; }
+  #kbd { position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; border:0; padding:0; font-size:16px; pointer-events:none; }
+  .ripple { position:absolute; width:36px; height:36px; margin:-18px 0 0 -18px; border-radius:50%; background:rgba(25,195,125,.35);
+            border:2px solid var(--acc); pointer-events:none; animation:rip .45s ease-out forwards; }
+  @keyframes rip { from { transform:scale(.3); opacity:1; } to { transform:scale(1.4); opacity:0; } }
+  .veil { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.55); z-index:2; }
+  .veil[hidden] { display:none; }
+  #screen:not([src]) { visibility:hidden; }
+  .card { width:100%; max-width:380px; background:var(--card); border:1px solid var(--line2); border-radius:14px; padding:20px; box-shadow:var(--pop); }
+  .card h2 { font-size:16px; margin:0 0 6px; }
+  .card p { margin:0 0 6px; color:var(--mute); }
+  .card .acts { display:flex; gap:8px; margin-top:12px; }
+  .card details { margin-top:8px; color:var(--mute); font-size:12px; }
+  .card pre { white-space:pre-wrap; word-break:break-word; font:12px ui-monospace, Menlo, monospace; }
+  .spin { width:18px; height:18px; border:2px solid var(--line2); border-top-color:var(--acc); border-radius:50%; animation:sp 0.8s linear infinite; margin-bottom:10px; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  #toast { position:absolute; left:50%; top:10px; transform:translateX(-50%); z-index:3; background:var(--card); border:1px solid var(--line2); border-radius:999px;
+           padding:6px 14px; font-size:13px; box-shadow:var(--pop); max-width:90%; text-align:center; }
+  #toast[hidden] { display:none; }
+  #toast.bad { border-color:var(--bad); }
+  .kb { display:flex; gap:6px; padding:6px 8px; background:var(--bar); border-top:1px solid var(--line); flex:none; align-items:center; }
+  .note { flex:none; margin:0; padding:2px 8px 4px; background:var(--bar); color:var(--mute); font-size:11px; text-align:center; }
+  @media (max-width:640px) {
+    .bar form { order:5; flex-basis:100%; }
+    .bar .sp { flex:1; }
+  }
+  @media (pointer:coarse) {
+    button, .tabw button, .tabs > button { min-height:44px; min-width:44px; }
+    input { min-height:44px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .ripple, .spin { animation-duration:.01ms; } }
 </style>
 </head>
 <body>
-<div class="bar">
-  <button onclick="send({t:'back'})" title="Back">‹</button>
-  <button onclick="send({t:'forward'})" title="Forward">›</button>
-  <button onclick="send({t:'reload'})" title="Reload">⟳</button>
-  <input id="url" placeholder="Type a URL and press Enter" autocapitalize="off" autocorrect="off" spellcheck="false">
-  <span class="name" id="name"></span>
-  <button class="stop" onclick="stopSession()" title="Close and sync">Stop</button>
-</div>
-<div class="tabs" id="tabs"></div>
-<div id="stage" tabindex="0"><img id="screen" alt=""><div id="status">Connecting…</div></div>
-<div class="kb">
-  <input id="txt" placeholder="Type here, then Send (for phones)" autocapitalize="off">
-  <button onclick="sendText()">Send</button>
-  <button onclick="send({t:'key',key:'Enter'})">⏎</button>
-  <button onclick="send({t:'key',key:'Backspace'})">⌫</button>
-  <button onclick="send({t:'key',key:'Tab'})">⇥</button>
+<div class="app">
+  <div class="bar">
+    <button onclick="send({t:'back'})" aria-label="Back" title="Back">‹</button>
+    <button onclick="send({t:'forward'})" aria-label="Forward" title="Forward">›</button>
+    <button onclick="send({t:'reload'})" aria-label="Reload" title="Reload">⟳</button>
+    <form id="urlf" autocomplete="off"><input id="url" aria-label="Address" placeholder="Search or type an address" enterkeyhint="go"
+      autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url"></form>
+    <span class="name" id="name"></span><span class="sp"></span>
+    <button class="stop" id="stop" onclick="stopSession()" title="Close the cloud browser and save the login">Stop and save login</button>
+  </div>
+  <div class="tabs" id="tabs" role="tablist" aria-label="Tabs"></div>
+  <div id="stage">
+    <img id="screen" alt="" aria-label="The cloud browser's screen" draggable="false">
+    <input id="kbd" aria-label="Type into the cloud browser" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="enter">
+    <div class="veil" id="card" role="status" aria-live="polite"><div class="card" id="cardin"><div class="spin"></div><h2>Connecting…</h2><p>Reaching the cloud browser.</p></div></div>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+  <div class="kb">
+    <button id="zoom" onclick="cycleZoom()" aria-label="Zoom" title="Zoom: fit, 100%, 150%">Fit</button>
+    <input id="txt" aria-label="Text to send" placeholder="Type text" autocapitalize="off" enterkeyhint="send">
+    <button onclick="sendText()">Send</button>
+    <button onclick="send({t:'key',key:'Enter'})" aria-label="Press Enter" title="Enter">⏎</button>
+    <button onclick="send({t:'key',key:'Backspace'})" aria-label="Press Backspace" title="Backspace">⌫</button>
+    <button onclick="send({t:'key',key:'Tab'})" aria-label="Press Tab" title="Tab">⇥</button>
+  </div>
+  <p class="note">Anyone with this link can control this browser. Don't share it.</p>
 </div>
 <script>
 const qs = new URLSearchParams(location.search), sid = location.pathname.split("/").pop(), tok = qs.get("t");
-const img = document.getElementById("screen"), stage = document.getElementById("stage"), st = document.getElementById("status");
-let ws, lastUrl = null, prevBlob = null, closed = false;
+const $ = id => document.getElementById(id);
+const img = $("screen"), stage = $("stage"), card = $("card"), kbd = $("kbd");
+const V = { ws: null, attempts: 0, ended: false, running: false, os: "", stopping: false, send };
+window.pigeonViewer = V;
+const MAX_ATTEMPTS = 8, SENT = "​";
+let curBlob = null, tabsKey = null, lastUrl = null, retryTimer = null, toastTimer = null, name = "";
 
-function connect() {
-  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/" + sid + "?t=" + encodeURIComponent(tok));
-  ws.binaryType = "blob";
-  ws.onmessage = ev => {
-    if (typeof ev.data !== "string") {
-      const u = URL.createObjectURL(ev.data);
-      img.onload = () => { if (prevBlob) URL.revokeObjectURL(prevBlob); prevBlob = u; };
-      img.src = u; st.style.display = "none"; return;
-    }
-    const m = JSON.parse(ev.data);
-    document.getElementById("name").textContent = m.name || "";
-    if (m.status !== "running") { st.style.display = "block"; st.textContent = m.status === "error" ? "Error: " + (m.error || "") : m.status + "…"; }
-    const tabs = m.tabs || [];
-    document.getElementById("tabs").innerHTML = tabs.map(t => `<span class="tab ${t.active ? "on" : ""}" onclick="send({t:'tab',i:${t.i}})">${(t.title || t.url || "new tab").replace(/[<>&]/g, "")}</span>`).join("")
-      + `<span class="tab" onclick="send({t:'newtab'})">+</span>` + (tabs.length > 1 ? `<span class="tab" onclick="send({t:'closetab'})">×</span>` : "");
-    const active = tabs.find(t => t.active);
-    const urlBox = document.getElementById("url");
-    if (active && active.url !== lastUrl && document.activeElement !== urlBox) { urlBox.value = active.url; lastUrl = active.url; }
-  };
-  ws.onclose = () => { if (!closed) { st.style.display = "block"; st.textContent = "Disconnected. Reconnecting…"; setTimeout(connect, 1500); } };
+// ------------------------------------------------------------------ status card
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function showCard(title, body, { spin = false, acts = "", details = "" } = {}) {
+  $("cardin").innerHTML = (spin ? `<div class="spin"></div>` : "") + `<h2>${esc(title)}</h2>` + (body ? `<p>${esc(body)}</p>` : "")
+    + (details ? `<details><summary>Technical details</summary><pre>${esc(details)}</pre></details>` : "")
+    + (acts ? `<div class="acts">${acts}</div>` : "");
+  card.hidden = false;
 }
-function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
-function pt(e) { const r = img.getBoundingClientRect(); const sx = img.naturalWidth / r.width, sy = img.naturalHeight / r.height;
-  return { x: Math.round((e.clientX - r.left) * sx), y: Math.round((e.clientY - r.top) * sy) }; }
+const hideCard = () => { card.hidden = true; };
+const NEXT = "You can close this tab, or start the account again from the Pigeon dashboard.";
+function endedCard(m) {
+  const mins = m.idle_minutes ? Math.round(m.idle_minutes) : 10;
+  if (m.status === "error") return showCard("The cloud browser closed", m.message || "Something went wrong.", { details: m.error, acts: "" });
+  showCard("This session has ended", m.reason === "idle"
+    ? `It stopped after ${mins} minute${mins === 1 ? "" : "s"} with no one watching. Your login was saved. ${NEXT}`
+    : `It was stopped. Your login was saved. ${NEXT}`);
+}
+function toast(msg, bad = false, ms = 2500) {
+  const t = $("toast"); t.textContent = msg; t.className = bad ? "bad" : ""; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms);
+}
+function finish(m) {   // the session is over: no more reconnects, no more input
+  V.ended = true; V.running = false; clearTimeout(retryTimer); $("toast").hidden = true;
+  document.querySelectorAll(".bar button, .kb button, .tabs button").forEach(b => { b.disabled = true; });
+  if (m) endedCard(m);
+}
 
-img.addEventListener("click", e => { stage.focus(); send({ t: "click", ...pt(e) }); });
+// ------------------------------------------------------------------ connection
+function connect() {
+  const ws = V.ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/" + sid + "?t=" + encodeURIComponent(tok || ""));
+  ws.binaryType = "blob";
+  ws.onopen = () => { V.attempts = 0; };
+  ws.onmessage = ev => {
+    if (typeof ev.data !== "string") return frame(ev.data);
+    const m = JSON.parse(ev.data);
+    if (m.status === "stopped" || m.status === "error") return finish(m);
+    if (m.name && m.name !== name) { name = m.name; $("name").textContent = name; document.title = `${name} · Pigeon cloud browser`; }
+    V.os = m.os || V.os;
+    renderTabs(m.tabs || []);
+    if (m.status === "running") { V.running = true; if (!V.stopping) hideCard(); }
+    else if (m.status === "starting") showCard("Opening the browser…", "This takes a few seconds.", { spin: true });
+    else if (m.status === "syncing") showCard("Saving your login…", "Keep this tab open for a moment.", { spin: true });
+  };
+  ws.onclose = ev => {
+    if (V.ws !== ws) return;
+    if (V.ended) return;
+    if (ev.code === 4410) return finish(null);
+    if (ev.code === 4404) {
+      finish(null);
+      return showCard("This link has expired", "The session it pointed to has ended, or the link isn't complete. Start the account again from the Pigeon dashboard to get a new link.");
+    }
+    if (V.stopping) return;
+    V.running = false;
+    V.attempts++;
+    if (V.attempts > MAX_ATTEMPTS) {
+      return showCard("Can't reach the cloud browser", "Check your connection, then try again. The browser keeps running on the server for a while.",
+        { acts: `<button onclick="retryNow()">Try again</button>` });
+    }
+    const wait = Math.min(15000, 1000 * 2 ** (V.attempts - 1));
+    showCard("Connection lost", `Reconnecting (attempt ${V.attempts} of ${MAX_ATTEMPTS})… Input is paused.`, { spin: true });
+    retryTimer = setTimeout(connect, wait);
+  };
+}
+function retryNow() { V.attempts = 0; showCard("Connecting…", "Reaching the cloud browser.", { spin: true }); connect(); }
+function send(m) {
+  if (V.ended) return false;
+  if (V.ws && V.ws.readyState === 1) { V.ws.send(JSON.stringify(m)); return true; }
+  toast("Reconnecting — input paused");
+  return false;
+}
+function frame(blob) {
+  const u = URL.createObjectURL(blob);
+  if (curBlob) URL.revokeObjectURL(curBlob);   // one live blob at a time: the old frame is being replaced anyway
+  curBlob = u; img.src = u;
+}
+window.addEventListener("beforeunload", e => {
+  if (V.ended || V.stopping) return;
+  e.preventDefault(); e.returnValue = "";
+});
+
+// ------------------------------------------------------------------ tabs
+function renderTabs(tabs) {
+  const key = JSON.stringify(tabs);
+  if (key === tabsKey) return;   // rebuild only on change, so taps and focus aren't lost
+  tabsKey = key;
+  const many = tabs.length > 1;
+  $("tabs").innerHTML = tabs.map(t => {
+    const label = t.title || t.url || "New tab";
+    return `<div class="tabw ${t.active ? "on" : ""}"><button class="tab" role="tab" aria-selected="${t.active}" aria-label="Tab ${t.i + 1}: ${esc(label)}"
+      onclick="send({t:'tab',i:${t.i}})">${esc(label)}</button>${many ? `<button class="tabx" aria-label="Close tab ${t.i + 1}: ${esc(label)}" onclick="send({t:'closetab',i:${t.i}})">×</button>` : ""}</div>`;
+  }).join("") + `<button aria-label="New tab" title="New tab" onclick="send({t:'newtab'})">+</button>`;
+  const active = tabs.find(t => t.active), box = $("url");
+  if (active && active.url !== lastUrl && document.activeElement !== box) { box.value = active.url; lastUrl = active.url; }
+}
+
+// ------------------------------------------------------------------ pointer input
+function pt(e) {
+  const r = img.getBoundingClientRect(), s = img.naturalWidth / r.width || 1;
+  return { x: Math.round((e.clientX - r.left) * s), y: Math.round((e.clientY - r.top) * s) };
+}
+function ripple(e) {
+  const r = stage.getBoundingClientRect(), d = document.createElement("span");
+  d.className = "ripple"; d.style.left = (e.clientX - r.left + stage.scrollLeft) + "px"; d.style.top = (e.clientY - r.top + stage.scrollTop) + "px";
+  stage.appendChild(d); setTimeout(() => d.remove(), 600);
+}
+function focusKeys() { kbd.value = SENT; kbd.focus({ preventScroll: true }); }
+img.addEventListener("click", e => { ripple(e); send({ t: "click", ...pt(e) }); focusKeys(); });
 img.addEventListener("dblclick", e => send({ t: "click", n: 2, ...pt(e) }));
 img.addEventListener("contextmenu", e => { e.preventDefault(); send({ t: "click", button: "right", ...pt(e) }); });
 let lastMove = 0;
-img.addEventListener("mousemove", e => { const n = Date.now(); if (n - lastMove > 100) { lastMove = n; send({ t: "move", ...pt(e) }); } });
-stage.addEventListener("wheel", e => { e.preventDefault(); send({ t: "scroll", dx: e.deltaX, dy: e.deltaY, ...pt(e) }); }, { passive: false });
-let touchY = null;
-stage.addEventListener("touchstart", e => { touchY = e.touches[0].clientY; }, { passive: true });
-stage.addEventListener("touchmove", e => { if (touchY === null) return; const y = e.touches[0].clientY; const d = touchY - y;
-  if (Math.abs(d) > 12) { send({ t: "scroll", dy: d * 2, ...pt(e.touches[0]) }); touchY = y; } e.preventDefault(); }, { passive: false });
+img.addEventListener("mousemove", e => { const n = Date.now(); if (n - lastMove > 100) { lastMove = n; if (V.ws && V.ws.readyState === 1) send({ t: "move", ...pt(e) }); } });
+stage.addEventListener("wheel", e => { if (e.ctrlKey) return; e.preventDefault(); send({ t: "scroll", dx: e.deltaX, dy: e.deltaY, ...pt(e) }); }, { passive: false });
+// one finger: pan the zoomed view first, then scroll the remote page (both axes); two fingers: the browser's own pinch zoom
+let touchAt = null, acc = { x: 0, y: 0 };
+stage.addEventListener("touchstart", e => { touchAt = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; acc = { x: 0, y: 0 }; }, { passive: true });
+stage.addEventListener("touchmove", e => {
+  if (e.touches.length !== 1 || !touchAt) { touchAt = null; return; }
+  const t = e.touches[0], dx = touchAt.x - t.clientX, dy = touchAt.y - t.clientY;
+  touchAt = { x: t.clientX, y: t.clientY };
+  e.preventDefault();
+  const sl = stage.scrollLeft, st = stage.scrollTop;
+  stage.scrollLeft += dx; stage.scrollTop += dy;
+  acc.x += dx - (stage.scrollLeft - sl); acc.y += dy - (stage.scrollTop - st);
+  if (Math.abs(acc.x) > 8 || Math.abs(acc.y) > 8) {
+    const r = img.getBoundingClientRect(), s = img.naturalWidth / r.width || 1;
+    send({ t: "scroll", dx: Math.round(acc.x * s), dy: Math.round(acc.y * s), ...pt(t) });
+    acc = { x: 0, y: 0 };
+  }
+}, { passive: false });
+stage.addEventListener("touchend", () => { touchAt = null; }, { passive: true });
 
-const SPECIAL = new Set(["Enter","Backspace","Tab","Escape","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Delete","Home","End","PageUp","PageDown"]);
-stage.addEventListener("keydown", e => {
+// ------------------------------------------------------------------ zoom
+const ZOOMS = ["Fit", "100%", "150%"];
+let zoom = 0;
+function applyZoom() {
+  stage.classList.toggle("z100", zoom === 1); stage.classList.toggle("z150", zoom === 2);
+  img.style.width = zoom === 0 ? "" : (img.naturalWidth * (zoom === 1 ? 1 : 1.5)) + "px";
+  $("zoom").textContent = ZOOMS[zoom];
+}
+function cycleZoom() { zoom = (zoom + 1) % ZOOMS.length; applyZoom(); }
+
+// ------------------------------------------------------------------ keyboard: everything goes through the hidden #kbd input
+const SPECIAL = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Delete", "Home", "End", "PageUp", "PageDown"]);
+const remoteMac = () => V.os === "macos";
+kbd.addEventListener("keydown", e => {
+  if (e.isComposing || e.key === "Unidentified" || e.key === "Process") return;
   const mod = e.ctrlKey || e.metaKey || e.altKey;
-  if (mod && e.key.length === 1) { e.preventDefault(); send({ t: "key", key: (e.ctrlKey ? "Control+" : "") + (e.metaKey ? "Meta+" : "") + (e.altKey ? "Alt+" : "") + e.key }); return; }
-  if (SPECIAL.has(e.key)) { e.preventDefault(); send({ t: "key", key: e.key }); return; }
-  if (e.key.length === 1) { e.preventDefault(); send({ t: "type", text: e.key }); }
+  if (mod && e.key.length === 1) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "v") return;   // let the paste event bring the text
+    e.preventDefault();
+    const parts = [];
+    if (e.ctrlKey || (e.metaKey && !remoteMac())) parts.push("Control");
+    if (e.metaKey && remoteMac()) parts.push("Meta");
+    if (e.altKey) parts.push("Alt");
+    send({ t: "key", key: parts.join("+") + "+" + e.key });
+    return;
+  }
+  if (SPECIAL.has(e.key)) { e.preventDefault(); send({ t: "key", key: e.key }); }
 });
-stage.addEventListener("paste", e => { const t = e.clipboardData.getData("text"); if (t) send({ t: "type", text: t }); });
-document.getElementById("url").addEventListener("keydown", e => { if (e.key === "Enter") { send({ t: "goto", url: e.target.value }); stage.focus(); } });
-function sendText() { const i = document.getElementById("txt"); if (i.value) { send({ t: "type", text: i.value }); i.value = ""; } }
-document.getElementById("txt").addEventListener("keydown", e => { if (e.key === "Enter") { sendText(); send({ t: "key", key: "Enter" }); } });
+kbd.addEventListener("input", e => {
+  if (e.isComposing) return;
+  const v = kbd.value;
+  if (v.length < SENT.length || (e.inputType || "").startsWith("delete")) send({ t: "key", key: "Backspace" });
+  else { const text = v.split(SENT).join(""); if (text) send({ t: "type", text }); }
+  kbd.value = SENT;
+});
+kbd.addEventListener("compositionend", () => { const text = kbd.value.split(SENT).join(""); if (text) send({ t: "type", text }); kbd.value = SENT; });
+kbd.addEventListener("paste", e => {
+  e.preventDefault();
+  const t = (e.clipboardData || window.clipboardData).getData("text");
+  if (t) send({ t: "type", text: t });
+});
+
+// ------------------------------------------------------------------ address bar and text box
+function toUrl(s) {
+  s = s.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^(about|data|file|view-source):/i.test(s)) return s;
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(s)) return "http://" + s;
+  if (!/\s/.test(s) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(s)) return "https://" + s;
+  return "https://duckduckgo.com/?q=" + encodeURIComponent(s);
+}
+V.toUrl = toUrl;
+$("urlf").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("url").value; if (!v.trim()) return;
+  if (send({ t: "goto", url: toUrl(v) })) { lastUrl = null; $("url").blur(); }
+});
+function sendText() { const i = $("txt"); if (i.value && send({ t: "type", text: i.value })) i.value = ""; }
+$("txt").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); sendText(); } });
+
+// ------------------------------------------------------------------ stop
 async function stopSession() {
-  if (!confirm("Close the browser and sync this profile?")) return;
-  closed = true; st.style.display = "block"; st.textContent = "Syncing…";
-  const r = await fetch(`/sessions/${sid}?t=${encodeURIComponent(tok)}`, { method: "DELETE" });
-  const j = await r.json().catch(() => ({}));
-  st.textContent = j.status === "stopped" ? "Closed and synced. You can close this tab." : "Stopped: " + (j.error || j.status || r.status);
+  if (!confirm("Stop the cloud browser and save the login?")) return;
+  const btn = $("stop");
+  btn.disabled = true; btn.textContent = "Saving…"; V.stopping = true;
+  showCard("Saving your login…", "This can take up to a minute. Keep this tab open.", { spin: true });
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 150000);
+  try {
+    const r = await fetch(`/sessions/${sid}?t=${encodeURIComponent(tok || "")}`, { method: "DELETE", signal: ctl.signal });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && (j.status === "stopped" || j.status === "error")) {
+      finish({ status: j.status, reason: j.status === "stopped" ? "stopped" : "error", error: j.error, message: j.status === "error" ? "The cloud browser closed because of a problem. Your last changes may not be saved." : "" });
+    } else if (r.ok) {
+      finish(null);
+      showCard("Still saving", "The runner is still saving the login. It will finish on its own; you can close this tab.");
+    } else if (r.status === 404) {
+      finish(null);
+      showCard("This session has ended", NEXT);
+    } else {
+      throw new Error("status " + r.status);
+    }
+  } catch (e) {
+    V.stopping = false; btn.disabled = false; btn.textContent = "Stop and save login";
+    if (V.running) hideCard();
+    toast("Couldn't reach the runner. Check your connection and try Stop again.", true, 6000);
+  } finally { clearTimeout(timer); }
 }
 connect();
 </script>

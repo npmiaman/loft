@@ -29,8 +29,9 @@ def parse_proxy(url: str | None) -> dict | None:
         raise BadInput(f"bad proxy {url!r}; use scheme://user:pass@host:port")
     out = {"server": f"{u.scheme}://{u.hostname}:{u.port}"}
     if u.username:
-        out["username"] = u.username
-        out["password"] = u.password or ""
+        from urllib.parse import unquote
+        out["username"] = unquote(u.username)  # credentials arrive URL-encoded (an @ or : in a password must be)
+        out["password"] = unquote(u.password or "")
     return out
 
 

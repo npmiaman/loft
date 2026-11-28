@@ -86,7 +86,7 @@ def test_panel_renders_every_tab_and_sends_the_right_calls():
         page.click("#pg button:text-is('Run')")
         assert "Add the people on this page" in text()
         page.select_option("#pgmode", "full")
-        page.click("#pg button:text-is('▶ Start')")
+        page.click("#pg button:text-is('Start')")
         page.click("#pg button:text-is('Queue everyone on this page')")
         page.click("#pg button:text-is('Check replies')")
         page.click("#pg button:text-is('Run the check')")
@@ -100,7 +100,7 @@ def test_panel_renders_every_tab_and_sends_the_right_calls():
 
         page.click("#pg button:text-is('Messages')")
         assert "Undo AI spin" in text()
-        page.click("#pg button:text-is('✨ Add spintax with AI')")
+        page.click("#pg button:text-is('Add spintax with AI')")
 
         page.click("#pg button:text-is('Product')")
         assert "Acme" in text() and "r/saas" in text()

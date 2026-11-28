@@ -175,6 +175,7 @@ class Client:
 
     # ------------------------------------------------------------ auth
     def _after_auth(self, out: dict, password: str) -> dict:
+        """The vault key is derived from the account password; a wrong one is refused here rather than carried on with a useless key."""
         self.token = out["token"]
         self.vault = crypto.vault_key(password, out["vault_salt"])
         self.keys = {}
@@ -183,6 +184,12 @@ class Client:
             priv, pub = crypto.new_keypair()
             self.j("PUT", "/me/keypair", {"pubkey": crypto.b64e(pub), "privkey": crypto.b64e(
                 crypto.encrypt(self.vault, priv, f"privkey:{me['id']}"))})
+        elif me.get("privkey"):
+            try:  # the keypair was wrapped with the right secret, or this one is wrong: say so instead of carrying on with a useless key
+                crypto.decrypt(self.vault, crypto.b64d(me["privkey"]), f"privkey:{me['id']}")
+            except Exception:
+                self.token, self.vault = "", None
+                raise PigeonError(401, "wrong encryption passphrase")
         self._save()
         return out
 
@@ -202,6 +209,9 @@ class Client:
 
     def me(self) -> dict:
         return self.j("GET", "/me")
+
+    def set_name(self, name: str) -> dict:
+        return self.j("PATCH", "/me", {"name": name})
 
     # ------------------------------------------------------------ teams
     def create_team(self, name: str) -> dict:

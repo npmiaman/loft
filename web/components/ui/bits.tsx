@@ -36,24 +36,43 @@ export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
 
 export function Callout({ children, tone, action, icon }: { children: React.ReactNode; tone?: "warn" | "bad"; action?: React.ReactNode; icon?: React.ReactNode }) {
   return (
-    <div className={cn("flex items-center gap-3 rounded-xl border border-line bg-hover/60 px-4 py-3", tone === "warn" && "border-transparent bg-warn-bg", tone === "bad" && "border-transparent bg-bad-bg text-bad")}>
+    <div className={cn("flex items-center gap-3 rounded-lg border border-line bg-hover/60 px-4 py-3", tone === "warn" && "border-transparent bg-warn-bg", tone === "bad" && "border-transparent bg-bad-bg text-bad")}>
       {icon}
-      <div className="min-w-0 flex-1 text-[13.5px]">{children}</div>
+      <div className="min-w-0 flex-1 text-sm">{children}</div>
       {action}
     </div>
   );
 }
 
-export const Card = ({ className, ...p }: React.ComponentProps<"div">) => <div className={cn("rounded-xl border border-line bg-card shadow-card", className)} {...p} />;
+export const Card = ({ className, ...p }: React.ComponentProps<"div">) => <div className={cn("rounded-lg border border-line bg-card shadow-card", className)} {...p} />;
 
 export function PageHead({ title, sub, actions }: { title: string; sub?: string; actions?: React.ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.02em]">{title}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
         {sub && <p className="mt-1 text-mute">{sub}</p>}
       </div>
       <div className="flex flex-wrap items-center gap-2">{actions}</div>
     </div>
   );
+}
+
+/** "Nothing here" — one style everywhere. Never use it for "still loading" (that is Skeleton). */
+export function EmptyState({ title, body, action, className, compact }: { title: string; body?: React.ReactNode; action?: React.ReactNode; className?: string; compact?: boolean }) {
+  return (
+    <div data-empty className={cn("text-center", compact ? "px-4 py-6" : "px-6 py-12", className)}>
+      <div className={cn("font-semibold tracking-tight", compact ? "text-sm" : "text-lg")}>{title}</div>
+      {body && <p className={cn("mx-auto mt-1 max-w-md text-mute", compact ? "text-sm" : "")}>{body}</p>}
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+/** A grey placeholder in the shape of what is loading. */
+export const Skeleton = ({ className }: { className?: string }) => <div data-skeleton aria-hidden className={cn("animate-pulse rounded-md bg-line", className)} />;
+
+/** Skeleton rows, for a list or table that is loading. */
+export function SkeletonRows({ n = 3, className }: { n?: number; className?: string }) {
+  return <div role="status" aria-label="Loading" className={cn("space-y-2.5 p-4", className)}>{Array.from({ length: n }, (_, i) => <Skeleton key={i} className="h-5" />)}</div>;
 }

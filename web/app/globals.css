@@ -7,24 +7,37 @@
   --color-bg: var(--bg); --color-side: var(--side); --color-card: var(--card); --color-ink: var(--ink); --color-ink2: var(--ink2);
   --color-mute: var(--mute); --color-line: var(--line); --color-line2: var(--line2); --color-hover: var(--hover); --color-acc: var(--acc);
   --color-ok: var(--ok); --color-warn: var(--warn); --color-bad: var(--bad); --color-ok-bg: var(--ok-bg); --color-warn-bg: var(--warn-bg);
-  --color-bad-bg: var(--bad-bg); --color-on-ink: var(--on-ink);
+  --color-bad-bg: var(--bad-bg); --color-on-ink: var(--on-ink); --color-on-bad: var(--on-bad); --color-on-ok: var(--on-ok); --color-ok-solid: var(--ok-solid);
+  --color-overlay: var(--overlay);
   --shadow-pop: var(--pop); --shadow-card: var(--shadow);
+  /* Type scale: 12 / 13 / 14 / 16, plus display sizes for page titles (24) and big numbers (28). */
+  --text-xs: 12px; --text-xs--line-height: 1.5; --text-sm: 13px; --text-sm--line-height: 1.5;
+  --text-base: 14px; --text-base--line-height: 1.5; --text-lg: 16px; --text-lg--line-height: 1.4;
+  --text-2xl: 24px; --text-2xl--line-height: 1.25; --text-display: 28px; --text-display--line-height: 1.15;
+  /* Radii (Tailwind's defaults): controls rounded-md (6px), surfaces rounded-lg (8px), overlays rounded-xl (12px). Nothing else. */
   --animate-pop: pop .16s ease; --animate-fade: fade .16s ease; --animate-slide: slide .26s cubic-bezier(.2,.8,.2,1);
 }
 :root {
   --bg:#fff; --side:#f7f7f8; --card:#fff; --ink:#0d0d0d; --ink2:#353740; --mute:#6e6e80; --line:#ececf1; --line2:#d9d9e3; --hover:#f4f4f6;
-  --acc:#10a37f; --ok:#10a37f; --warn:#b54708; --bad:#d92d20; --on-ink:#fff; --ok-bg:#ecfdf5; --warn-bg:#fffaeb; --bad-bg:#fef3f2;
-  --shadow:0 1px 2px rgba(16,24,40,.05); --pop:0 12px 32px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06); color-scheme:light;
+  --acc:#10a37f; --ok:#10a37f; --warn:#b54708; --bad:#d92d20; --on-ink:#fff; --on-bad:#fff; --on-ok:#fff; --ok-bg:#ecfdf5; --ok-solid:#0b7a5e; --warn-bg:#fffaeb; --bad-bg:#fef3f2;
+  --overlay:rgba(13,13,13,.4); --shadow:0 1px 2px rgba(16,24,40,.05); --pop:0 12px 32px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06); color-scheme:light;
 }
+/* dark: follow the system unless Settings → Appearance forces a theme (data-theme on <html>) */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg:#151516; --side:#101011; --card:#1b1b1d; --ink:#ececf1; --ink2:#c5c5d2; --mute:#9b9ba8; --line:#2a2a2e; --line2:#3b3b41; --hover:#242428;
-    --acc:#19c37d; --ok:#19c37d; --warn:#f5a623; --bad:#f97066; --on-ink:#0d0d0d; --ok-bg:#10261d; --warn-bg:#2a2012; --bad-bg:#2c1816;
-    --shadow:none; --pop:0 12px 32px rgba(0,0,0,.55); color-scheme:dark;
+    --acc:#19c37d; --ok:#19c37d; --warn:#f5a623; --bad:#f97066; --on-ink:#0d0d0d; --on-bad:#1a0b09; --on-ok:#06130d; --ok-bg:#10261d; --ok-solid:#19c37d; --warn-bg:#2a2012; --bad-bg:#2c1816;
+    --overlay:rgba(0,0,0,.6); --shadow:none; --pop:0 12px 32px rgba(0,0,0,.55); color-scheme:dark;
   }
+}
+:root[data-theme="dark"] {
+    --bg:#151516; --side:#101011; --card:#1b1b1d; --ink:#ececf1; --ink2:#c5c5d2; --mute:#9b9ba8; --line:#2a2a2e; --line2:#3b3b41; --hover:#242428;
+    --acc:#19c37d; --ok:#19c37d; --warn:#f5a623; --bad:#f97066; --on-ink:#0d0d0d; --on-bad:#1a0b09; --on-ok:#06130d; --ok-bg:#10261d; --ok-solid:#19c37d; --warn-bg:#2a2012; --bad-bg:#2c1816;
+    --overlay:rgba(0,0,0,.6); --shadow:none; --pop:0 12px 32px rgba(0,0,0,.55); color-scheme:dark;
 }
 @keyframes pop { from { opacity:0; transform:translateY(6px) scale(.985); } }
 @keyframes fade { from { opacity:0; } }
+@keyframes flow { from { transform:translate3d(-36px,18px,0); opacity:.3; } 50% { opacity:1; } to { transform:translate3d(52px,-30px,0); opacity:.35; } }
 @keyframes slide { from { transform:translateX(48px); opacity:0; } }
 
 @layer base {
@@ -32,7 +45,24 @@
   body { @apply bg-bg text-ink font-sans antialiased; font-size:14px; line-height:1.5; letter-spacing:-.003em; }
   button, [role="button"] { cursor:pointer; }
   button:disabled { cursor:not-allowed; }
-  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:6px; }
+  /* The one focus style, for everything: an outline that follows each element's own corners. */
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  input::placeholder, textarea::placeholder { color:var(--mute); opacity:1; }
   ::selection { background: color-mix(in srgb, var(--acc) 28%, transparent); }
 }
 @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+
+/* Settings panel (components/ui/settings-panel.tsx, adapted from chatcn): its variables point at this app's tokens, so it follows
+   light/dark and the Appearance setting with everything else. */
+:root {
+  --chatcn-bg: var(--bg); --chatcn-card: var(--card); --chatcn-fg: var(--ink); --chatcn-fg-muted: var(--mute); --chatcn-fg-subtle: var(--mute);
+  --chatcn-fg-faint: var(--mute); --chatcn-border: var(--line); --chatcn-fill: var(--line); --chatcn-fill-hover: var(--hover);
+  --chatcn-fill-active: var(--line2); --chatcn-accent: var(--ink); --chatcn-accent-fg: var(--on-ink); --chatcn-primary: var(--ink);
+  --chatcn-primary-fg: var(--on-ink); --chatcn-radius-xs: 4px; --chatcn-radius-sm: 6px; --chatcn-radius-md: 8px; --chatcn-radius-xl: 16px;
+  --chatcn-ease-out: cubic-bezier(0.23, 1, 0.32, 1); --chatcn-ease-standard: ease;
+  --chatcn-shadow-xs: 0 0 0 1px var(--line2), 0 1px 2px rgba(16, 24, 40, .05);
+  --chatcn-scrollbar: color-mix(in srgb, var(--ink) 14%, transparent); --chatcn-scrollbar-hover: color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.chatcn-focus:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.chatcn-scroll { scrollbar-width: thin; scrollbar-color: var(--chatcn-scrollbar) transparent; }
+.chatcn-scroll:hover { scrollbar-color: var(--chatcn-scrollbar-hover) transparent; }

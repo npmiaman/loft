@@ -22,6 +22,8 @@ def signed_in(t, server):
     r = t.post("/api/login", json={"server": server, "email": "a@x.io", "password": "password1", "signup": True})
     assert r.status_code == 200, r.text
     t.post("/api/teams", json={"name": "T"})
+    for p in t.get("/api/state").json()["profiles"]:  # these tests count their own accounts; the starter has its own test
+        t.delete(f"/api/profiles/{p['id']}")
 
 
 def test_foreign_host_and_missing_header_blocked(app):
@@ -128,7 +130,7 @@ def test_dashboard_backup_restore_via_app(app):
     out = t.post("/api/restore", json={"data": base64.b64encode(blob).decode(), "passphrase": "pw"}).json()
     assert out["profiles"] == 1
     names = [p["name"] for p in t.get("/api/state").json()["profiles"]]
-    assert names == ["P"]
+    assert sorted(names) == ["My Reddit account", "P"]  # the restored account, next to the new team's own starter
     # wrong passphrase is a clean 400
     assert t.post("/api/restore", json={"data": base64.b64encode(blob).decode(), "passphrase": "no"}).status_code == 400
 

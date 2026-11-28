@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from ..control import SessionControl
-from . import ops
+from . import governor, ops
 from .agent import Agent
 from .bridge import Bridge, Stop
 from .central import CentralBrain
@@ -95,7 +95,7 @@ class PigeonHost:
         return dict(state=self.state, job=self.job, mode=self.mode, since=self.since, last=self.last,
                     error=(self.last or {}).get("error"), stats=dict(st.stats), daily=dict(st.get_daily()),
                     product=(st.product or {}).get("name"), leads=leads, central=bool(self.central),
-                    log=[dict(e) for e in st.logs[-8:]])
+                    log=[dict(e) for e in st.logs[-8:]], cap=governor.effective_cap(st.settings))
 
     def h_status(self, _b) -> tuple[int, dict]:
         return 200, self.call(self._status, 10)

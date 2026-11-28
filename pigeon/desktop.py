@@ -116,6 +116,7 @@ class NewProfile(BaseModel):
     notes: str = ""
     tags: list[str] = []
     canvas: Optional[str] = None  # default: real on this machine's OS, else noise
+    proxy_name: str = ""
 
 
 class BulkIn(BaseModel):
@@ -131,9 +132,11 @@ class BulkIn(BaseModel):
 class EditProfile(BaseModel):
     name: Optional[str] = None
     proxy: Optional[str] = None  # "" clears
+    proxy_name: Optional[str] = None  # a label for the proxy, so lists never need to show its address
     start_url: Optional[str] = None
     notes: Optional[str] = None
     canvas: Optional[str] = None
+    tags: Optional[list[str]] = None  # None leaves them as they are
 
 
 class TemplateIn(BaseModel):
@@ -143,6 +146,28 @@ class TemplateIn(BaseModel):
     start_url: str = ""
     tags: list[str] = []
     canvas: str = "noise"
+
+
+def reddit_signed_in(data_dir: Path) -> Optional[bool]:
+    """Is this account's browser signed in to Reddit? Read straight from its saved Firefox cookie store, without opening a browser.
+    True/False, or None when this computer has no copy of the account's browser data (or it can't be read).
+    Only `reddit_session` counts: Reddit also sets token_v2/loid for logged-out visitors."""
+    import sqlite3
+    import time
+    db = Path(data_dir) / "cookies.sqlite"
+    if not db.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)  # immutable: readable even while the browser holds a lock
+        try:
+            row = con.execute(
+                "SELECT 1 FROM moz_cookies WHERE (host = 'reddit.com' OR host LIKE '%.reddit.com') AND name = 'reddit_session' "
+                "AND (CASE WHEN expiry > 100000000000 THEN expiry / 1000 ELSE expiry END) > ? LIMIT 1", (time.time(),)).fetchone()
+        finally:
+            con.close()
+        return row is not None
+    except sqlite3.Error:
+        return None
 
 
 def make_app() -> FastAPI:
@@ -192,7 +217,10 @@ def make_app() -> FastAPI:
     def new_profile(c: Client, tid: int, body: NewProfile) -> dict:
         from .engine import default_canvas, host_os, new_fingerprint
         os_name = body.os or host_os()
-        return c.create_profile(tid, name=body.name, os=os_name, proxy=parse_proxy(body.proxy or None),
+        proxy = parse_proxy(body.proxy or None)
+        if proxy and body.proxy_name.strip():
+            proxy["name"] = body.proxy_name.strip()[:60]  # kept inside the encrypted proxy; the launcher only passes server/user/password
+        return c.create_profile(tid, name=body.name, os=os_name, proxy=proxy,
                                 start_url=body.start_url, notes=body.notes, tags=body.tags,
                                 canvas=body.canvas or default_canvas(os_name), fingerprint=new_fingerprint(os_name))
 
@@ -207,16 +235,47 @@ def make_app() -> FastAPI:
     def patch(c: Client, pid: int, body: EditProfile) -> dict:
         f: dict[str, Any] = {k: v for k, v in dict(name=body.name, start_url=body.start_url, notes=body.notes,
                                                    canvas=body.canvas).items() if v is not None}
+        if body.tags is not None:
+            f["tags"] = list(dict.fromkeys(t.strip() for t in body.tags if t.strip()))
+        label = body.proxy_name.strip()[:60] if body.proxy_name is not None else None
         if body.proxy is not None:
             if body.proxy.strip():
                 f["proxy"] = parse_proxy(body.proxy)
+                if label is None:  # a new address keeps the old label unless one is given
+                    label = ((c.profile(pid).get("proxy") or {}).get("name") or "")
+                if label:
+                    f["proxy"]["name"] = label
             else:
                 f["clear_proxy"] = True
+        elif label is not None:  # renaming the proxy only: keep its address
+            cur = dict(c.profile(pid).get("proxy") or {})
+            if cur:
+                if label:
+                    cur["name"] = label
+                else:
+                    cur.pop("name", None)
+                f["proxy"] = cur
         return c.patch_profile(pid, **f)
 
-    def with_local(ps: list) -> list:
+    reddit_users: dict[int, tuple[float, dict]] = {}  # team -> (when fetched, {profile id: Reddit username the agent registered})
+
+    def registered_users(c: Client, tid: int) -> dict:
+        import time
+        hit = reddit_users.get(tid)
+        if hit and time.time() - hit[0] < 30:  # the page polls every 3s; this changes rarely
+            return hit[1]
+        try:
+            m = {a["profile_id"]: a["username"] for a in c.pigeon_accounts(tid) if a.get("profile_id")}
+        except PigeonError:
+            m = hit[1] if hit else {}
+        reddit_users[tid] = (time.time(), m)
+        return m
+
+    def with_local(ps: list, users: Optional[dict] = None) -> list:
+        from . import engine
         for p in ps:
             p["running_here"] = jobs.alive(f"run-{p['id']}")
+            p["reddit"] = {"signed_in": reddit_signed_in(engine.PROFILES / str(p["id"]) / "data"), "user": (users or {}).get(p["id"])}
         return ps
 
     # ------------------------------------------------------------ UI
@@ -258,10 +317,49 @@ def make_app() -> FastAPI:
             out.update(team=tid, role=next(t["role"] for t in me["teams"] if t["id"] == tid),
                        has_key=tid in c.keys or _try_key(c, tid))
             if out["has_key"]:
-                out.update(profiles=with_local(c.profiles(tid)), members=c.members(tid),
+                out.update(profiles=with_local(c.profiles(tid), registered_users(c, tid)), members=c.members(tid),
                            templates=c.templates(tid), runners=[{"id": r["id"], "name": r["name"], "url": r["url"]}
                                                                 for r in c.runners(tid)])
         return out
+
+    def probe_server(server: Optional[str], ca: Optional[str] = None) -> dict:
+        """Is `server` (or the saved one) a reachable Pigeon server, and does it have accounts yet? Raises HTTPException with a
+        sentence a person can act on: never a stack trace, never someone else's HTML page."""
+        import re
+
+        import httpx
+        cfg = load_config()
+        url = ((server or "").strip() or cfg.get("server") or "http://127.0.0.1:4400").rstrip("/")
+        if not re.match(r"^https?://[^\s/:]+(:\d+)?(/\S*)?$", url):
+            raise HTTPException(400, "That isn't a valid server address. It should look like https://pigeon.yourcompany.com.")
+        verify: Any = ca or cfg.get("ca") or True
+        unreachable = "Couldn't reach that server. Check the address and that the server is running."
+        not_pigeon = "That address doesn't look like a Pigeon server. Check it with whoever runs your team's server."
+        try:
+            r = httpx.get(url + "/auth/status", timeout=8, verify=verify)
+            if r.status_code == 404:  # an older Pigeon server without /auth/status
+                h = httpx.get(url + "/health", timeout=8, verify=verify)
+                if h.headers.get("content-type", "").startswith("application/json") and h.json().get("ok"):
+                    return {"server": url, "accounts": None}
+                raise HTTPException(502, not_pigeon)
+        except httpx.HTTPError:
+            raise HTTPException(502, unreachable)
+        try:
+            j = r.json()
+        except ValueError:
+            raise HTTPException(502, not_pigeon)
+        if not isinstance(j, dict) or "accounts" not in j:
+            raise HTTPException(502, not_pigeon)
+        return {"server": url, "accounts": bool(j["accounts"])}
+
+    @app.get("/api/auth/status")
+    def auth_status(server: Optional[str] = None):
+        """For the sign-in page: open on "create the first account" for a new server; explain a bad address in plain words."""
+        try:
+            return {"reachable": True, **probe_server(server)}
+        except HTTPException as e:
+            cfg = load_config()
+            return {"reachable": False, "error": e.detail, "server": ((server or "").strip() or cfg.get("server") or "")}
 
     @app.post("/api/login")
     def login(body: LoginIn):
@@ -271,6 +369,7 @@ def make_app() -> FastAPI:
             HOME.mkdir(parents=True, exist_ok=True)
             ca = str(HOME / "server-ca.pem")
             Path(ca).write_text(body.ca.strip() + "\n")
+        probe_server(body.server, ca)  # a wrong address fails here, with a plain reason
         c = Client(server=body.server, token="", persist=True, ca=ca)
         out = c.register(body.email, body.password, body.name, body.invite or None) if body.signup \
             else c.login(body.email, body.password)
@@ -278,6 +377,10 @@ def make_app() -> FastAPI:
         cfg["team"] = out.get("team_id")
         save_config(cfg)
         return {"ok": True}
+
+    @app.patch("/api/me")
+    def set_my_name(body: dict):
+        return client().set_name(str(body.get("name") or ""))
 
     @app.post("/api/logout")
     def logout():
@@ -289,8 +392,11 @@ def make_app() -> FastAPI:
 
     @app.post("/api/teams")
     def new_team(body: dict):
-        t = client().create_team(body["name"])
+        c = client()
+        t = c.create_team(body["name"])
         set_team(t["id"])
+        # One browser profile to start with, so first run is "sign in to Reddit", not a form. Only one: more is the user's choice.
+        new_profile(c, t["id"], NewProfile(name="My Reddit account", start_url="https://www.reddit.com/login"))
         return t
 
     @app.post("/api/team/{tid}")
@@ -300,9 +406,41 @@ def make_app() -> FastAPI:
 
     @app.post("/api/join")
     def join(body: dict):
-        out = client().accept(body["code"].strip())
+        c = client()
+        code = str(body.get("code") or "").strip()
+        try:
+            out = c.accept(code)
+        except PigeonError as e:
+            if e.status != 409:
+                raise
+            out = _adopt_key(c, code)  # already a member, but this device has no key: the code is used for its key part
         set_team(out["team_id"])
         return out
+
+    def _adopt_key(c: Client, code: str) -> dict:
+        from .client import _split_invite
+        try:
+            _, key = _split_invite(code)
+        except Exception:
+            key = None
+        if not key:
+            raise HTTPException(400, "That code has no key part. Paste the whole invite code.")
+        tid = team(c)
+        if _try_key(c, tid):
+            return {"team_id": tid, "role": None}
+        epoch = next(t["key_epoch"] for t in c.me()["teams"] if t["id"] == tid)
+        from . import crypto
+        ps = c.j("GET", f"/teams/{tid}/profiles")
+        # Decrypting one of the team's accounts proves the key is this team's. A member who can see no accounts has nothing to
+        # check against; a wrong key then only means their accounts still won't open, and a new code fixes it.
+        if ps:
+            fp = c.j("GET", f"/profiles/{ps[0]['id']}/launch").get("fingerprint")
+            try:
+                crypto.dec_text(key, fp, f"fp:{tid}")
+            except Exception:
+                raise HTTPException(400, "That code's key doesn't unlock this team's accounts. Ask for a new invite code.")
+        c._store_key(tid, key, epoch)
+        return {"team_id": tid, "role": None}
 
     @app.post("/api/profiles")
     def create(body: NewProfile):
@@ -335,7 +473,8 @@ def make_app() -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/profiles/{pid}/cloud")
-    def cloud(pid: int, body: dict):
+    def cloud(pid: int, body: Optional[dict] = None):
+        body = body or {}
         from .runner import start_cloud_session
         c = client()
         rs = c.runners(team(c))
@@ -360,9 +499,29 @@ def make_app() -> FastAPI:
     def unshare(pid: int, uid: int):
         return client().unshare(pid, uid)
 
+    @app.post("/api/proxy/test")
+    def test_proxy(body: dict):
+        """Try a proxy before saving it: the exit IP sites will see, and how fast it answers. Errors in plain words."""
+        from . import engine
+        proxy = parse_proxy(str(body.get("proxy") or "").strip() or None)
+        if not proxy:
+            raise HTTPException(400, "Enter the proxy's host and port.")
+        r = engine.check_proxy(proxy, timeout=10, samples=2)
+        if r.get("ok"):
+            return {k: r[k] for k in ("ok", "ip", "ms", "stable") if k in r} | ({"warning": "The exit IP changes between connections, so sites would see different IPs."} if not r.get("stable", True) else {})
+        err = r.get("error", "")
+        if "407" in err or "auth" in err.lower():
+            msg = "The proxy rejected the username or password."
+        elif "timeout" in err.lower():
+            msg = "The proxy didn't answer in time. Check the host and port, or try again."
+        else:
+            msg = "Couldn't connect through this proxy. Check the host, port, username and password."
+        return {"ok": False, "error": msg}
+
     @app.get("/api/profiles/{pid}/proxy")
     def get_proxy(pid: int):
-        return {"proxy": proxy_url(client().profile(pid).get("proxy"))}
+        p = client().profile(pid).get("proxy")
+        return {"proxy": proxy_url(p), "name": (p or {}).get("name", "")}
 
     @app.post("/api/profiles/{pid}/cookies")
     def cookies_in(pid: int, body: dict):
@@ -471,6 +630,31 @@ def make_app() -> FastAPI:
                                "subreddits": len(setup.get("subreddits") or []), "limits": cfg["limits"],
                                "unreadable": cfg["unreadable"]}}
 
+    # The AI (DeepSeek) key lives only on this machine (pigeon/agent/state.KEYFILE, never synced). It is never sent back
+    # in full: the UI only learns whether one is set and its last four characters.
+    @app.get("/api/pigeon/key")
+    def pigeon_key():
+        from .agent.state import load_key
+        key, _ = load_key()
+        return {"set": bool(key), "hint": f"…{key[-4:]}" if len(key) >= 8 else ("set" if key else "")}
+
+    @app.post("/api/pigeon/key")
+    def pigeon_key_set(body: dict):
+        from .agent.state import save_key
+        key = str(body.get("key") or "").strip()
+        if not key:
+            raise HTTPException(400, "Paste the key first.")
+        if len(key) < 8 or any(ch.isspace() for ch in key):
+            raise HTTPException(400, "That doesn't look like an API key.")
+        save_key(key)
+        return {"ok": True}
+
+    @app.delete("/api/pigeon/key")
+    def pigeon_key_clear():
+        from .agent.state import save_key
+        save_key("")
+        return {"ok": True}
+
     @app.get("/api/rotate-key/preview")
     def rotate_preview():
         c = client()
@@ -507,8 +691,8 @@ def make_app() -> FastAPI:
         return c.audit(team(c), 200)
 
     @app.get("/api/apikey")
-    def get_api_key():
-        return {"key": api_key(), "base": "http://127.0.0.1:4410/v1"}
+    def get_api_key(request: Request):
+        return {"key": api_key(), "base": f"http://{request.headers.get('host') or '127.0.0.1:4410'}/v1"}  # the port this app is on
 
     @app.post("/api/browser/install")
     def install_browser():

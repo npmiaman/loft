@@ -319,6 +319,10 @@ def test_dm_session_writes_and_sends(page, tmp_path, fast):
     st.put_lead(dict(lead("alex_dev", status="queued"), message=None))
     ag = Agent(Bridge(page, pace=2), st, Llm("k", transport=fake_deepseek()))
     page.goto("https://www.reddit.com/")
+    ag.run("dm", minutes=0.3)  # it writes the message, then waits: every message needs a person's approval
+    assert st.get_lead("alex_dev")["status"] == "draft" and "alex_dev" not in page.seen["users"]
+    from pigeon.agent import ops
+    ops.run_state_op(ops.Ctx(st), "lead_approve", {"username": "alex_dev"})
     ag.run("dm", minutes=1)
     l = st.get_lead("alex_dev")
     assert l["status"] == "sent" and l["sent_at"]

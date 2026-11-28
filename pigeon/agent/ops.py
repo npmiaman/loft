@@ -49,6 +49,9 @@ def _lead(c: Ctx, username: str) -> dict:
 def write_message(c: Ctx, l: dict) -> str:
     """Write (AI or template) the DM for one lead and set its status. Returns the new status."""
     s = c.st.settings
+    if c.st.contacted.get(l["username"].lower()) is not None and l.get("status") not in ("sent", "replied"):
+        l.update(status="skipped", error="this account already messaged them")
+        return "skipped"
     if c.brain and l["username"].lower() in c.brain.own_usernames():
         l.update(status="skipped", error="one of our own accounts")
         return "skipped"
@@ -63,7 +66,7 @@ def write_message(c: Ctx, l: dict) -> str:
     if not msg:
         raise RuntimeError("empty message")
     l["message"] = msg
-    l["status"] = "draft" if use_ai and s["approve_ai_drafts"] else "ready"
+    l["status"] = "draft"  # every message waits for a person to approve it, whoever wrote it (AI, template, import, page scan)
     l["error"] = None
     return l["status"]
 
@@ -250,7 +253,7 @@ def leads_import(c: Ctx, a: dict) -> dict:
     for n in names:
         if c.st.get_lead(n):
             dup += 1
-        elif n.lower() in contacted or n.lower() in own or n.lower() == c.st.settings["my_username"].lower():
+        elif n.lower() in contacted or n.lower() in own or c.st.was_contacted(n) or n.lower() == c.st.settings["my_username"].lower():
             team += 1
         else:
             c.st.leads[n.lower()] = dict(username=n, subreddit="", post_url="", post_title="", snippet="", fit=50, intent="imported",
@@ -259,10 +262,19 @@ def leads_import(c: Ctx, a: dict) -> dict:
     return {"added": added, "out": f"imported {added} username(s); {dup} already in the queue" + (f"; {team} skipped (our own accounts, or the team already contacted them)" if team else "")}
 
 
-def leads_clear(c: Ctx, _a: dict) -> dict:
+def leads_clear(c: Ctx, a: dict) -> dict:
+    """Delete leads. `unsent` keeps everyone already messaged (sent/replied). Either way, who was contacted is remembered
+    (State.contacted), so nobody cleared here can be queued or messaged again."""
+    for l in c.st.leads.values():
+        c.st._note_contact(l)
+    if a.get("unsent"):
+        gone = [k for k, l in c.st.leads.items() if l["status"] not in ("sent", "replied")]
+        for k in gone:
+            del c.st.leads[k]
+        return {"deleted": len(gone), "out": f"deleted {len(gone)} unsent lead(s)"}
     n = len(c.st.leads)
     c.st.leads.clear()
-    return {"out": f"deleted {n} lead(s)"}
+    return {"deleted": n, "out": f"deleted {n} lead(s)"}
 
 
 def leads_export(c: Ctx, _a: dict) -> dict:
@@ -288,6 +300,20 @@ def opp_skip(c: Ctx, a: dict) -> dict:
         raise RuntimeError("opportunity not found")
     o["status"] = "skipped"
     return {"out": "skipped"}
+
+
+def opp_edit(c: Ctx, a: dict) -> dict:
+    """Change a comment draft before it is posted."""
+    o = next((x for x in c.st.opportunities if x["id"] == a["id"]), None)
+    if not o:
+        raise RuntimeError("opportunity not found")
+    if o["status"] != "pending":
+        raise RuntimeError(f"this comment is already {o['status']}")
+    draft = (a.get("draft") or "").strip()
+    if not draft:
+        raise RuntimeError("the comment is empty")
+    o["draft"] = draft
+    return {"out": "saved"}
 
 
 def ideas_generate(c: Ctx, _a: dict) -> dict:
@@ -433,7 +459,7 @@ STATE_OPS: dict[str, Callable[[Ctx, dict], dict]] = {
     "template_undo": template_undo, "template_preview": template_preview, "leads_list": leads_list, "lead_write": lead_write,
     "lead_edit": lead_edit, "lead_approve": lead_approve, "lead_skip": lead_set_status("skipped"),
     "lead_replied": lead_set_status("replied"), "leads_import": leads_import, "leads_clear": leads_clear,
-    "leads_export": leads_export, "opps_list": opps_list, "opp_skip": opp_skip, "ideas_generate": ideas_generate,
+    "leads_export": leads_export, "opps_list": opps_list, "opp_skip": opp_skip, "opp_edit": opp_edit, "ideas_generate": ideas_generate,
     "ideas_list": ideas_list, "idea_posted": idea_posted, "posts_list": posts_list, "brain_backfill": brain_backfill,
     "team_show": team_show, "team_pull": team_pull, "team_publish": team_publish,
 }

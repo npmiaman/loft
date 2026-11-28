@@ -78,7 +78,8 @@ class Agent:
         own = {mine} | (self.central.own_usernames() if self.central else set())
         fresh, seen = [], set()
         for e in entries:
-            if not e["author"] or e["author"].lower() in own or len(e["text"].strip()) < 25 or e["id"] in seen:
+            if (not e["author"] or e["author"].lower() in own or len(e["text"].strip()) < 25 or e["id"] in seen
+                    or self.st.was_contacted(e["author"])):
                 continue
             seen.add(e["id"])
             fresh.append(e)
@@ -220,6 +221,10 @@ class Agent:
 
     def send_dm(self, lead: dict) -> None:
         u = lead["username"]
+        if self.st.contacted.get(u.lower()) is not None:  # this account already messaged them (maybe before a Clear)
+            self.st.patch_lead(u, status="skipped", error="this account already messaged them")
+            self.st.log("info", f"Skipped u/{u}: already messaged from this account")
+            return
         claim = None
         if self.central:  # reserve the person for this account first; refuse to send if we can't be sure nobody else has
             try:
@@ -399,6 +404,8 @@ class Agent:
         lead = self.st.get_lead(username)
         if not lead or not lead.get("message"):
             raise RuntimeError("No message written for this lead yet.")
+        if lead["status"] != "ready":
+            raise RuntimeError("Approve this message first: every message waits for approval before it is sent.")
         g = governor.check_dm(self.st)
         if not g["ok"]:
             raise RuntimeError(g["reason"])
@@ -514,7 +521,7 @@ class Agent:
             added = 0
             for it in items:
                 u = it["username"]
-                if u.lower() == mine or u.lower() in team or self.st.get_lead(u):
+                if u.lower() == mine or u.lower() in team or self.st.get_lead(u) or self.st.was_contacted(u):
                     continue
                 self.st.put_lead(dict(username=u, subreddit=it["subreddit"], post_url=it["postUrl"], post_title=it["postTitle"],
                                       snippet=it["snippet"], fit=50, intent="unscored", reason="Added from page scan",

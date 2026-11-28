@@ -5,14 +5,29 @@
 <title>Pigeon</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --mute:#6b7280; --line:#e5e7eb; --acc:#2f6fed; --ok:#16a34a; --warn:#b45309; --bad:#dc2626; --soft:#eef3ff; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#171a21; --ink:#e7e9ee; --mute:#9aa1ad; --line:#272b35; --acc:#5b8cff; --soft:#1b2233; } }
+  /* The new dashboard's tokens (web/app/globals.css), so both UIs look like one product. */
+  :root {
+    --bg:#fff; --side:#f7f7f8; --card:#fff; --ink:#0d0d0d; --ink2:#353740; --mute:#6e6e80; --line:#ececf1; --line2:#d9d9e3; --hover:#f4f4f6;
+    --acc:#10a37f; --ok:#10a37f; --warn:#b54708; --bad:#d92d20; --on-ink:#fff; --ok-bg:#ecfdf5; --warn-bg:#fffaeb; --bad-bg:#fef3f2;
+    --shadow:0 1px 2px rgba(16,24,40,.05); --pop:0 12px 32px rgba(16,24,40,.14), 0 2px 6px rgba(16,24,40,.06); color-scheme:light;
+    --soft:var(--side);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#151516; --side:#101011; --card:#1b1b1d; --ink:#ececf1; --ink2:#c5c5d2; --mute:#9b9ba8; --line:#2a2a2e; --line2:#3b3b41; --hover:#242428;
+      --acc:#19c37d; --ok:#19c37d; --warn:#f5a623; --bad:#f97066; --on-ink:#0d0d0d; --ok-bg:#10261d; --warn-bg:#2a2012; --bad-bg:#2c1816;
+      --shadow:none; --pop:0 12px 32px rgba(0,0,0,.55); color-scheme:dark;
+    }
+  }
   * { box-sizing:border-box; }
-  body { margin:0; font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  body { margin:0; font:14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--side); color:var(--ink); }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:2px; border-radius:6px; }
+  header a.back { color:var(--mute); text-decoration:none; font-size:13px; white-space:nowrap; }
+  header a.back:hover { color:var(--ink); }
   header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:2; }
   header b { font-size:16px; }
   nav button { background:none; border:0; padding:6px 10px; border-radius:6px; color:var(--mute); cursor:pointer; font:inherit; }
-  nav button.on { background:var(--bg); color:var(--ink); font-weight:600; }
+  nav button.on { background:var(--hover); color:var(--ink); font-weight:600; }
   .sp { flex:1; }
   main { padding:20px; max-width:1240px; margin:0 auto; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; }
@@ -22,9 +37,11 @@
   th { font-size:12px; color:var(--mute); font-weight:500; text-transform:uppercase; letter-spacing:.4px; }
   tr:last-child td { border-bottom:0; }
   .mute { color:var(--mute); } .small { font-size:12px; }
-  button.b { font:inherit; padding:6px 12px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
-  button.b:hover { border-color:var(--acc); }
-  button.p { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button.b { font:inherit; padding:6px 12px; border-radius:6px; border:1px solid var(--line2); background:var(--card); color:var(--ink); cursor:pointer; }
+  button.b:hover, a.b:hover { background:var(--hover); }
+  a.b { display:inline-block; font:inherit; padding:6px 12px; border-radius:6px; border:1px solid var(--line2); color:var(--ink); text-decoration:none; }
+  button.p { background:var(--ink); border-color:var(--ink); color:var(--on-ink); }
+  button.p:hover { background:var(--ink2); }
   button.d { color:var(--bad); }
   button:disabled { opacity:.5; cursor:default; }
   input, select, textarea { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); width:100%; }
@@ -39,6 +56,12 @@
   dialog::backdrop { background:rgba(0,0,0,.35); }
   .login { max-width:400px; margin:70px auto; padding:24px; }
   .err { color:var(--bad); min-height:18px; margin-top:8px; }
+  .note { color:var(--mute); min-height:18px; margin-top:8px; }
+  #notice { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:10; display:flex; gap:12px; align-items:center; max-width:min(560px,92vw);
+            background:var(--card); color:var(--ink); border:1px solid var(--line2); border-left:4px solid var(--ok); border-radius:10px; padding:10px 14px; box-shadow:var(--pop); }
+  #notice.bad { border-left-color:var(--bad); }
+  #notice[hidden] { display:none; }
+  #notice button { background:none; border:0; color:var(--mute); cursor:pointer; font:inherit; padding:2px 6px; }
   .log { font:12px ui-monospace, Menlo, monospace; color:var(--mute); white-space:pre-wrap; max-width:520px; }
   code { font:12px ui-monospace, Menlo, monospace; background:var(--bg); padding:2px 6px; border-radius:4px; word-break:break-all; }
   .banner { background:var(--soft); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:14px; display:flex; gap:12px; align-items:center; }
@@ -49,11 +72,23 @@
   .menu > div button:hover { background:var(--bg); }
   h3 { margin:0 0 6px; }
   .section { margin-top:22px; }
+  @media (max-width:640px) {
+    header { flex-wrap:wrap; gap:8px 12px; padding:10px 14px; }
+    header nav { order:5; flex-basis:100%; display:flex; overflow-x:auto; }
+    main { padding:12px; }
+    main table, main tbody, main tr, main td { display:block; width:100%; }
+    main th { display:none; }
+    main td { border:0; padding:6px 12px; }
+    main tr { border-bottom:1px solid var(--line); padding:6px 0; }
+    main td .row { justify-content:flex-start !important; flex-wrap:wrap; }
+    .toolbar input { max-width:none !important; }
+  }
 </style>
 </head>
 <body>
 <div id="app"></div>
 <dialog id="dlg"></dialog>
+<div id="notice" role="status" aria-live="polite" hidden><span id="notice_t"></span><button onclick="$('#notice').hidden=true" aria-label="Dismiss">Dismiss</button></div>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -64,9 +99,35 @@ async function api(method, path, body, raw) {
                                          body: body ? JSON.stringify(body) : undefined });
   if (raw && r.ok) return r;
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || r.statusText));
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : readable(j.detail) || r.statusText);
   return j;
 }
+// The server's validation errors arrive as a list of {loc, msg, type, ctx}; turn them into a sentence (same as web/lib/api.ts).
+function readable(detail) {
+  if (!Array.isArray(detail)) return detail ? JSON.stringify(detail) : "";
+  return detail.map(d => {
+    const raw = String((d.loc || [])[(d.loc || []).length - 1] ?? "");
+    const field = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).replace(/_/g, " ") : "This";
+    const c = d.ctx || {};
+    if (d.type === "missing") return `${field} is required.`;
+    if (d.type === "string_too_short") return c.min_length === 1 ? `${field} is required.` : `${field} needs at least ${c.min_length} characters.`;
+    if (d.type === "string_too_long") return `${field} can be at most ${c.max_length} characters.`;
+    return `${field}: ${d.msg ?? "is not valid"}.`;
+  }).join(" ");
+}
+let noticeTimer = null;
+function notice(msg, bad = false) {   // replaces alert(): an inline message that doesn't block the page
+  $("#notice_t").textContent = msg; $("#notice").className = bad ? "bad" : ""; $("#notice").hidden = false;
+  clearTimeout(noticeTimer); if (!bad) noticeTimer = setTimeout(() => { $("#notice").hidden = true; }, 8000);
+}
+// Link every label to the field right after it, so clicking the label focuses the field and screen readers name it.
+function linkLabels(root) {
+  (root || document).querySelectorAll("label:not([for])").forEach(l => {
+    const f = l.nextElementSibling;
+    if (f && /^(INPUT|SELECT|TEXTAREA)$/.test(f.tagName) && f.id) l.htmlFor = f.id;
+  });
+}
+new MutationObserver(() => linkLabels()).observe(document.body, { childList: true, subtree: true });
 async function load() { S = await api("GET", "/state"); render(); }
 const canAdmin = () => S.role === "owner" || S.role === "admin";
 const job = k => S.jobs && S.jobs[k];
@@ -76,10 +137,11 @@ function render() {
   const teams = S.me.teams;
   $("#app").innerHTML = `
   <header>
+    <a class="back" href="/">← Back to the new dashboard</a>
     <b>Pigeon</b>
     <nav>${["profiles","team","activity"].concat(canAdmin() ? ["overview"] : []).map(t => `<button class="${tab===t?"on":""}" onclick="tab='${t}';render()">${NAV[t]}</button>`).join("")}</nav>
     <span class="sp"></span>
-    ${teams.length ? `<select style="width:auto" onchange="act(()=>api('POST','/team/'+this.value))">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
+    ${teams.length ? `<select style="width:auto" aria-label="Team" onchange="act(()=>api('POST','/team/'+this.value))">${teams.map(t => `<option value="${t.id}" ${t.id===S.team?"selected":""}>${esc(t.name)} · ${t.role}</option>`).join("")}</select>` : ""}
     <span class="mute small">${esc(S.me.email)} · ${esc(S.device)}</span>
     <button class="b" onclick="act(()=>api('POST','/logout'))">Sign out</button>
   </header>
@@ -90,7 +152,7 @@ function render() {
     ${f ? `<div class="log">${esc(f.log.join("\n"))}</div>` : ""}</div><span class="sp"></span>
     <button class="b p" ${f && f.alive ? "disabled" : ""} onclick="act(()=>api('POST','/browser/install'))">${f && f.alive ? "Downloading…" : "Install browser"}</button></div>`;
   if (teams.length && !S.has_key) top += `<div class="banner"><div><b>This device doesn't have the team's encryption key.</b>
-    <span class="mute">Profiles are end-to-end encrypted. Join with the full invite code (it ends with <code>.key</code>), or sign in again with your password.</span></div></div>`;
+    <span class="mute">Accounts are end-to-end encrypted. Join with the full invite code (it ends with <code>.key</code>), or sign in again with your password.</span></div></div>`;
   $("#main").innerHTML = top + `<div id="body"></div>`;
   if (!teams.length) return renderNoTeam();
   if (!S.has_key) return;
@@ -98,27 +160,28 @@ function render() {
 }
 
 function renderLogin() {
-  $("#app").innerHTML = `<div class="card login">
+  $("#app").innerHTML = `<form class="card login" id="loginf" onsubmit="event.preventDefault();login(false)">
     <h2 style="margin-top:0">Sign in to Pigeon</h2>
-    <label>Server</label><input id="srv" value="${esc(S.server || "http://127.0.0.1:4400")}">
-    <label>Email</label><input id="em" autocomplete="username">
-    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+    <label for="srv">Server</label><input id="srv" value="${esc(S.server || "http://127.0.0.1:4400")}">
+    <label for="em">Email</label><input id="em" type="email" autocomplete="username">
+    <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
     <details style="margin-top:10px"><summary class="mute small">New account</summary>
-      <label>Name</label><input id="nm"><label>Invite code (needed except for the first user)</label><input id="inv">
+      <label for="nm">Name</label><input id="nm"><label for="inv">Invite code (needed except for the first user)</label><input id="inv">
     </details>
     <details style="margin-top:6px"><summary class="mute small">Self-signed server certificate</summary>
-      <label>Paste the server's cert.pem</label><textarea id="ca" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+      <label for="ca">Paste the server's cert.pem</label><textarea id="ca" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
     </details>
-    <div class="row" style="margin-top:16px"><button class="b p" onclick="login(false)">Sign in</button><button class="b" onclick="login(true)">Create account</button></div>
-    <div class="err" id="err"></div></div>`;
+    <div class="row" style="margin-top:16px"><button class="b p" type="submit" id="login_go">Sign in</button><button class="b" type="button" onclick="login(true)">Create account</button></div>
+    <div class="note" id="lnote" role="status"></div><div class="err" id="err" role="alert"></div></form>`;
 }
 async function login(signup) {
+  const go = $("#login_go");
   try {
-    $("#err").textContent = "Deriving keys…";
+    $("#err").textContent = ""; $("#lnote").textContent = "Deriving keys…"; go.disabled = true;
     await api("POST", "/login", { server: $("#srv").value.trim(), email: $("#em").value.trim(), password: $("#pw").value,
       signup, name: $("#nm").value, invite: $("#inv").value.trim() || null, ca: $("#ca").value || null });
     await load();
-  } catch (e) { $("#err").textContent = e.message; }
+  } catch (e) { $("#lnote").textContent = ""; $("#err").textContent = e.message; go.disabled = false; }
 }
 
 function renderNoTeam() {
@@ -132,7 +195,7 @@ function renderNoTeam() {
 async function act(fn, btn) {
   if (btn) { btn.disabled = true; }
   try { const r = await fn(); await load(); return r; }
-  catch (e) { const el = ($("#dlg").open && $("#derr")) || $("#err"); if (el) el.textContent = e.message; else alert(e.message); }
+  catch (e) { const el = ($("#dlg").open && $("#derr")) || $("#err"); if (el) el.textContent = e.message; else notice(e.message, true); }
   finally { if (btn) btn.disabled = false; }
 }
 
@@ -152,7 +215,7 @@ function pigeonWords(pg) {
   return "Agent is " + ((pg.job === "run" ? MODE_WORDS[pg.mode] : JOB_WORDS[pg.job]) || "working");
 }
 function friendlyError(msg) {
-  if (/proxy not working/i.test(msg)) return "This account's proxy isn't responding, so the browser was not opened (it would have used your own IP). Check the proxy in ⋯ → Edit.";
+  if (/proxy not working/i.test(msg)) return "This account's proxy isn't responding, so the browser was not opened (it would have used your own IP). Check the proxy in More actions → Edit.";
   return msg;
 }
 function acct(p) {   // what is going on with this account, in one sentence
@@ -164,7 +227,7 @@ function acct(p) {   // what is going on with this account, in one sentence
   return { cls: "", text: p.version ? "Closed · saved" : "Not opened yet", sub: "" };
 }
 const net = p => p.proxy ? `<span class="mute small">Own proxy · ${esc(p.proxy.server.replace(/^[a-z0-9]+:\/\//i, ""))}</span>`
-                         : `<span class="small" style="color:var(--warn)">⚠ No proxy: uses your own IP</span>`;
+                         : `<span class="small" style="color:var(--warn)">No proxy: uses your own IP</span>`;
 function actions(p, pg, busy) {
   const id = p.id;
   if (!p.running_here) return `<button class="b p" ${busy ? "disabled" : ""} onclick="act(()=>api('POST','/profiles/${id}/run'),this)">Open browser</button>`;
@@ -172,7 +235,7 @@ function actions(p, pg, busy) {
   if (pg) {
     h += pg.state !== "idle"
       ? `<button class="b" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'stop'}))">Stop agent</button>`
-      : `<select id="pm${id}" style="width:auto" title="What should the agent do?" onchange="MODE[${id}]=this.value">
+      : `<select id="pm${id}" style="width:auto" aria-label="What should the agent do?" title="What should the agent do?" onchange="MODE[${id}]=this.value">
            ${[["find", "Find people (sends nothing)"], ["full", "Find people + message them"], ["dm", "Send approved messages"]].map(([v, t]) => `<option value="${v}" ${(MODE[id] || "find") === v ? "selected" : ""}>${t}</option>`).join("")}</select>
          <button class="b p" onclick="act(()=>api('POST','/profiles/${id}/pigeon',{action:'start',mode:$('#pm${id}').value}))">Start agent</button>`;
     h += `<button class="b" onclick="pgOpen(${id})">Agent controls</button>`;
@@ -185,7 +248,7 @@ function renderProfiles() {
   if (!HOW_SEEN) { HOW_SEEN = true; if (!S.profiles.some(p => p.version)) OPEN.add("how"); }
   $("#body").innerHTML = `
   <div class="toolbar">
-    <input id="q" style="max-width:280px" placeholder="Search accounts" value="${esc(filter)}"
+    <input id="q" style="max-width:280px" aria-label="Search accounts" placeholder="Search accounts" value="${esc(filter)}"
       oninput="filter=this.value.toLowerCase();renderProfiles();const q=$('#q');q.focus();q.setSelectionRange(q.value.length,q.value.length)">
     <span class="sp"></span>
     <button class="b" onclick="importDlg()">Import</button>
@@ -216,7 +279,7 @@ function row(p) {
     <td><div class="row" style="justify-content:flex-end;flex-wrap:wrap">
       ${actions(p, pg, busy)}
       ${S.runners.length ? `<button class="b" ${busy ? "disabled" : ""} onclick="cloud(${p.id},this)" title="Run on a cloud runner, view from any device">Cloud</button>` : ""}
-      <span class="menu" id="m${p.id}"><button class="b" onclick="toggleMenu(${p.id},event)">⋯</button><div>
+      <span class="menu" id="m${p.id}"><button class="b" aria-label="More actions for ${esc(p.name)}" aria-haspopup="true" onclick="toggleMenu(${p.id},event)">⋯</button><div>
         ${edit ? `<button onclick="editDlg(${p.id})">Edit</button><button onclick="shareDlg(${p.id})">Share</button>` : ""}
         <button ${busy ? "disabled" : ""} onclick="cookieDlg(${p.id})">Import cookies</button>
         <button ${busy ? "disabled" : ""} onclick="exportCookies(${p.id})">Export cookies</button>
@@ -270,12 +333,12 @@ async function createProfile() {
 
 function bulkDlg() {
   dlg(`<h3>Add many accounts</h3>
-    <div class="grid2"><div><label>How many</label><input id="b_n" type="number" value="10" min="1" max="500"></div><div><label>Name pattern ({n} = number)</label><input id="b_name" value="Profile {n}"></div></div>
+    <div class="grid2"><div><label>How many</label><input id="b_n" type="number" value="10" min="1" max="500"></div><div><label>Name pattern ({n} = number)</label><input id="b_name" value="Account {n}"></div></div>
     <div class="grid2"><div><label>OS fingerprint</label>${osSel("b_os",S.host_os,"b_canvas")}</div><div><label>Canvas</label>${canvasSel("b_canvas","real")}</div></div>
     <label>Proxies, one per line, assigned round-robin (optional)</label><textarea id="b_px" placeholder="http://user:pass@1.2.3.4:8080"></textarea>
     <label>Tags</label><input id="b_tags">
     <label>Start URL</label><input id="b_url">
-    <p class="mute small">Every profile gets its own fingerprint. Generating takes about a second each.</p>
+    <p class="mute small">Every account gets its own fingerprint. Generating takes about a second each.</p>
     <div class="row"><button class="b p" id="b_go" onclick="bulkGo()">Create</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }
 async function bulkGo() {
@@ -283,7 +346,7 @@ async function bulkGo() {
   try {
     const r = await api("POST", "/profiles/bulk", { count: +$("#b_n").value, name: $("#b_name").value, os: $("#b_os").value,
       canvas: $("#b_canvas").value, proxies: $("#b_px").value.split("\n"), tags: tags($("#b_tags").value), start_url: $("#b_url").value.trim() });
-    close_(); await load(); alert(`Created ${r.created} profiles.`);
+    close_(); await load(); notice(`Created ${r.created} account${r.created === 1 ? "" : "s"}.`);
   } catch (e) { $("#derr").textContent = e.message; b.disabled = false; b.textContent = "Create"; }
 }
 
@@ -296,11 +359,11 @@ async function editDlg(id) {
     <label>Canvas</label>${canvasSel("e_canvas", p.canvas)}
     <label>Start URL</label><input id="e_url" value="${esc(p.start_url)}">
     <label>Notes</label><input id="e_notes" value="${esc(p.notes)}">
-    <p class="mute small">The fingerprint (${esc(p.os)}) is fixed for this profile's life.</p>
+    <p class="mute small">The fingerprint (${esc(p.os)}) is fixed for this account's life.</p>
     <div class="row" style="margin-top:16px">
       <button class="b p" onclick="act(async()=>{await api('PATCH','/profiles/${id}',{name:$('#e_name').value,proxy:$('#e_proxy').value,canvas:$('#e_canvas').value,start_url:$('#e_url').value,notes:$('#e_notes').value});close_()})">Save</button>
       <button class="b" onclick="close_()">Cancel</button><span class="sp"></span>
-      <button class="b d" onclick="if(confirm('Delete this profile for the whole team?'))act(async()=>{await api('DELETE','/profiles/${id}');close_()})">Delete</button>
+      <button class="b d" onclick="if(confirm('Delete this account for the whole team? Its saved login goes too. There is no undo.'))act(async()=>{await api('DELETE','/profiles/${id}');close_()})">Delete</button>
     </div>`);
 }
 
@@ -309,7 +372,7 @@ async function shareDlg(id) {
   const shares = await api("GET", `/profiles/${id}/shares`);
   const others = S.members.filter(m => m.role === "member" && m.id !== p.created_by);
   dlg(`<h3>Share ${esc(p.name)}</h3>
-    <p class="mute small">Owners and admins see every profile. Members see only profiles they made or that are shared with them. <b>Run</b> can open it, and <b>Edit</b> can also change settings and sharing.</p>
+    <p class="mute small">Owners and admins see every account. Members see only accounts they made or that are shared with them. <b>Run</b> can open it, and <b>Edit</b> can also change settings and sharing.</p>
     <table>${others.map(m => { const s = shares.find(x => x.user_id === m.id);
       return `<tr><td>${esc(m.email)}</td><td><select onchange="setShare(${id},${m.id},this.value)">
         <option value="" ${!s?"selected":""}>no access</option><option value="run" ${s&&s.level==="run"?"selected":""}>run</option><option value="edit" ${s&&s.level==="edit"?"selected":""}>edit</option></select></td></tr>`; }).join("")
@@ -329,19 +392,19 @@ function cookieDlg(id) {
     <div class="row" style="margin-top:12px"><button class="b p" id="c_go" onclick="cookieGo(${id})">Import</button><button class="b" onclick="close_()">Cancel</button></div>`);
 }
 async function cookieGo(id) {
-  const b = $("#c_go"); b.disabled = true; b.textContent = "Opening profile…";
-  try { const r = await api("POST", `/profiles/${id}/cookies`, { text: $("#c_txt").value }); close_(); await load(); alert(`Imported ${r.cookies} cookies.`); }
+  const b = $("#c_go"); b.disabled = true; b.textContent = "Opening the account…";
+  try { const r = await api("POST", `/profiles/${id}/cookies`, { text: $("#c_txt").value }); close_(); await load(); notice(`Imported ${r.cookies} cookies.`); }
   catch (e) { $("#derr").textContent = e.message; b.disabled = false; b.textContent = "Import"; }
 }
 async function exportCookies(id) {
   try { const c = await api("GET", `/profiles/${id}/cookies`);
     save(new Blob([JSON.stringify(c, null, 2)], { type: "application/json" }), `cookies-${id}.json`); await load(); }
-  catch (e) { alert(e.message); }
+  catch (e) { notice(e.message, true); }
 }
 function save(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
 
 function exportDlg(id) {
-  dlg(`<h3>Export profile</h3>
+  dlg(`<h3>Export account</h3>
     <p class="mute small">A .pigeonprofile file holds the fingerprint, proxy, cookies and storage. Protect it with a passphrase.</p>
     <label>Passphrase</label><input id="x_pw" type="password">
     <div class="row" style="margin-top:12px"><button class="b p" id="x_go" onclick="exportGo(${id})">Export</button><button class="b" onclick="close_()">Cancel</button></div>`);
@@ -355,7 +418,7 @@ async function exportGo(id) {
   catch (e) { $("#derr").textContent = e.message; }
 }
 function importDlg() {
-  dlg(`<h3>Import profile</h3>
+  dlg(`<h3>Import an account</h3>
     <input type="file" id="i_file" accept=".pigeonprofile,.loftprofile">
     <label>Passphrase (if it has one)</label><input id="i_pw" type="password">
     <label>Name (optional)</label><input id="i_name">
@@ -374,12 +437,12 @@ async function renderTeam() {
   const key = await api("GET", "/apikey");
   $("#body").innerHTML = `
   <h3>Members</h3>
-  ${admin ? `<div class="toolbar"><select id="irole" style="width:auto"><option>member</option><option>admin</option></select>
+  ${admin ? `<div class="toolbar"><select id="irole" style="width:auto" aria-label="Role for the invite"><option>member</option><option>admin</option></select>
     <button class="b p" onclick="invite()">Create invite code</button></div><div id="icode" style="margin-bottom:12px"></div>` : ""}
   <div class="card"><table><tr><th>Member</th><th>Role</th><th></th></tr>
   ${S.members.map(m => { const can = admin && m.id !== S.me.id && (owner || m.role !== "owner");
     return `<tr><td>${esc(m.name)} <span class="mute small">${esc(m.email)}</span></td>
-    <td>${can ? `<select style="width:auto" onchange="act(()=>api('POST','/members/${m.id}/role',{role:this.value}))">
+    <td>${can ? `<select style="width:auto" aria-label="Role for ${esc(m.email)}" data-was="${m.role}" onchange="setRole(${m.id}, '${esc(m.email)}', this)">
       ${["member","admin"].concat(owner ? ["owner"] : []).map(r => `<option ${r===m.role?"selected":""}>${r}</option>`).join("")}</select>` : esc(m.role)}</td>
     <td style="text-align:right">${can ? `<button class="b d" onclick="removeMember(${m.id}, '${esc(m.email)}')">Remove</button>` : ""}</td></tr>`; }).join("")}
   </table></div>
@@ -387,54 +450,61 @@ async function renderTeam() {
     <button class="b" onclick="rotateKey()">Rotate team key</button>
     <button class="b" onclick="backupTeam()">Backup team</button>
     <button class="b" onclick="restoreDlg()">Restore backup</button>
-    <span class="mute small">Rotate: new key, everything re-encrypted, removed people locked out. Backup: one passphrase-encrypted file of every profile.</span></div>` : ""}
+    <span class="mute small">Rotate: new key, everything re-encrypted, removed people locked out. Backup: one passphrase-encrypted file of every account.</span></div>` : ""}
 
-  <div class="section"><h3>Templates</h3><p class="mute small">Starting settings for new profiles. Stored encrypted.</p>
+  <div class="section"><h3>Templates</h3><p class="mute small">Starting settings for new accounts. Stored encrypted.</p>
   <div class="card"><table><tr><th>Name</th><th>Settings</th><th></th></tr>
     ${S.templates.map(t => `<tr><td>${esc(t.name)}</td><td class="small mute">${esc(t.settings.os)} · canvas ${esc(t.settings.canvas)}${t.settings.proxy ? " · proxy" : ""}${(t.settings.tags||[]).length ? " · " + esc(t.settings.tags.join(", ")) : ""}</td>
-      <td style="text-align:right">${admin ? `<button class="b d" onclick="act(()=>api('DELETE','/templates/${t.id}'))">Delete</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No templates.</td></tr>`}
+      <td style="text-align:right">${admin ? `<button class="b d" aria-label="Delete template ${esc(t.name)}" onclick="if(confirm('Delete the template ${esc(t.name).replace(/'/g, "\\'")}? Accounts made from it keep their settings.'))act(()=>api('DELETE','/templates/${t.id}'))">Delete</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No templates.</td></tr>`}
   </table></div>${admin ? `<div class="row" style="margin-top:8px"><button class="b" onclick="tplDlg()">New template</button></div>` : ""}</div>
 
-  <div class="section"><h3>Cloud runners</h3><p class="mute small">Servers that run profiles for you, viewable from any browser or phone. Start one with <code>pigeon runner serve</code>.</p>
+  <div class="section"><h3>Cloud runners</h3><p class="mute small">Servers that run accounts for you, viewable from any browser or phone. Start one with <code>pigeon runner serve</code>.</p>
   <div class="card"><table><tr><th>Name</th><th>URL</th><th></th></tr>
-    ${S.runners.map(r => `<tr><td>${esc(r.name)}</td><td class="small">${esc(r.url)}</td><td style="text-align:right">${admin ? `<button class="b d" onclick="act(()=>api('DELETE','/runners/${r.id}'))">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No runners.</td></tr>`}
-  </table></div>${admin ? `<div class="row" style="margin-top:8px"><input id="r_name" placeholder="name" style="max-width:140px"><input id="r_url" placeholder="https://runner:4420"><input id="r_key" placeholder="runner key"><button class="b" onclick="act(()=>api('POST','/runners',{name:$('#r_name').value,url:$('#r_url').value,key:$('#r_key').value}))">Add</button></div>` : ""}</div>
+    ${S.runners.map(r => `<tr><td>${esc(r.name)}</td><td class="small">${esc(r.url)}</td><td style="text-align:right">${admin ? `<button class="b d" aria-label="Remove runner ${esc(r.name)}" onclick="if(confirm('Remove the runner ${esc(r.name).replace(/'/g, "\\'")}? Accounts running on it now keep running until stopped.'))act(()=>api('DELETE','/runners/${r.id}'))">Remove</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">No runners.</td></tr>`}
+  </table></div>${admin ? `<div class="row" style="margin-top:8px"><input id="r_name" aria-label="Runner name" placeholder="name" style="max-width:140px"><input id="r_url" aria-label="Runner URL" placeholder="https://runner:4420"><input id="r_key" aria-label="Runner key" placeholder="runner key"><button class="b" onclick="act(()=>api('POST','/runners',{name:$('#r_name').value,url:$('#r_url').value,key:$('#r_key').value}))">Add</button></div>` : ""}</div>
 
   <div class="section"><h3>Automation API</h3>
   <div class="card pad small">Local API on this machine: <code>${esc(key.base)}</code><br>Key: <code>${esc(key.key)}</code>
   <div class="mute" style="margin-top:6px">e.g. <code>curl -H "X-API-Key: ${esc(key.key)}" ${esc(key.base)}/profiles</code>. Full Playwright control is in the Python SDK: <code>pigeon exec ID script.py</code>.</div></div></div>
 
   <div class="section card pad" style="max-width:480px">
-    <label style="margin-top:0">Join another team</label><div class="row"><input id="jc" placeholder="invite code"><button class="b" onclick="act(()=>api('POST','/join',{code:$('#jc').value}))">Join</button></div>
-    <label>Create another team</label><div class="row"><input id="tn"><button class="b" onclick="act(()=>api('POST','/teams',{name:$('#tn').value}))">Create</button></div>
+    <label style="margin-top:0">Join another team</label><div class="row"><input id="jc" placeholder="invite code" aria-label="Invite code"><button class="b" onclick="act(()=>api('POST','/join',{code:$('#jc').value}))">Join</button></div>
+    <label>Create another team</label><div class="row"><input id="tn" aria-label="Team name"><button class="b" onclick="act(()=>api('POST','/teams',{name:$('#tn').value}))">Create</button></div>
     <div class="err" id="err"></div></div>`;
+}
+async function setRole(id, email, sel) {
+  const role = sel.value, msg = role === "owner"
+    ? `Make ${email} an owner? Owners can remove anyone, including you, and change every setting.`
+    : `Change ${email}'s role to ${role}?`;
+  if (!confirm(msg)) { sel.value = sel.dataset.was; return; }
+  await act(() => api("POST", `/members/${id}/role`, { role }));
 }
 async function removeMember(id, email) {
   if (!confirm(`Remove ${email}?`)) return;
   await act(() => api("DELETE", `/members/${id}`));
-  if (confirm(`${email} still holds the current team key. Rotate it now so they can't open anything? (Needs every profile stopped.)`)) rotateKey(true);
+  if (confirm(`${email} still holds the current team key. Rotate it now so they can't open anything? (Every account must be closed first.)`)) rotateKey(true);
 }
 async function rotateKey() {
   let pv;
-  try { pv = await api("GET", "/rotate-key/preview"); } catch (e) { alert(e.message); return; }
-  if (pv.running.length) { alert("Stop running profiles first: " + pv.running.map(r => `${r.name} (${r.device})`).join(", ")); return; }
-  let msg = `Rotate the team key?\n\n• re-encrypt ${pv.profiles} profile(s) and all templates\n• re-key ${pv.rekey.length} member(s): ${pv.rekey.map(m => m.email).join(", ") || "(none)"}\n• revoke ${pv.invites_to_revoke} unused invite(s)`;
+  try { pv = await api("GET", "/rotate-key/preview"); } catch (e) { notice(e.message, true); return; }
+  if (pv.running.length) { notice("Close these accounts first: " + pv.running.map(r => `${r.name} (${r.device})`).join(", ")); return; }
+  let msg = `Rotate the team key?\n\n• re-encrypt ${pv.profiles} account(s) and all templates\n• re-key ${pv.rekey.length} member(s): ${pv.rekey.map(m => m.email).join(", ") || "(none)"}\n• revoke ${pv.invites_to_revoke} unused invite(s)`;
   if (pv.without_key.length) msg += `\n• LEAVE WITHOUT ACCESS (no keypair yet): ${pv.without_key.map(m => m.email).join(", ")} — they must be re-invited`;
   if (!confirm(msg)) return;
   try { const r = await api("POST", "/rotate-key");
-    alert(`Key rotated. ${r.rekeyed.length} members re-keyed, ${r.invites_revoked} unused invites revoked.` + (r.without_key.length ? ` ${r.without_key.length} member(s) need a new invite.` : ""));
+    notice(`Key rotated. ${r.rekeyed.length} members re-keyed, ${r.invites_revoked} unused invites revoked.` + (r.without_key.length ? ` ${r.without_key.length} member(s) need a new invite.` : ""));
     await load(); }
-  catch (e) { alert(e.message); }
+  catch (e) { notice(e.message, true); }
 }
 async function backupTeam() {
   const pw = prompt("Passphrase for the backup (needed to restore it):"); if (!pw) return;
   try { const r = await api("POST", "/backup", { passphrase: pw }, true);
     save(await r.blob(), `pigeon-team-${S.team}.pigeonbackup`); }
-  catch (e) { alert(e.message); }
+  catch (e) { notice(e.message, true); }
 }
 function restoreDlg() {
   dlg(`<h3>Restore team backup</h3>
-    <p class="mute small">Adds the backup's profiles and templates to <b>this</b> team. It never deletes existing profiles.</p>
+    <p class="mute small">Adds the backup's accounts and templates to <b>this</b> team. It never deletes existing accounts.</p>
     <input type="file" id="rb_file" accept=".pigeonbackup,.loftbackup">
     <label>Passphrase</label><input id="rb_pw" type="password">
     <div class="row" style="margin-top:12px"><button class="b p" id="rb_go" onclick="restoreGo()">Restore</button><button class="b" onclick="close_()">Cancel</button></div>`);
@@ -445,7 +515,7 @@ async function restoreGo() {
   for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
   $("#rb_go").disabled = true; $("#rb_go").textContent = "Restoring…";
   try { const r = await api("POST", "/restore", { data: btoa(bin), passphrase: $("#rb_pw").value });
-    close_(); await load(); alert(`Restored ${r.profiles} profile(s) and ${r.templates} template(s).`); }
+    close_(); await load(); notice(`Restored ${r.profiles} account(s) and ${r.templates} template(s).`); }
   catch (e) { $("#derr").textContent = e.message; $("#rb_go").disabled = false; $("#rb_go").textContent = "Restore"; }
 }
 function tplDlg() {
@@ -457,14 +527,14 @@ function tplDlg() {
 async function invite() {
   try { const r = await api("POST", "/invite", { role: $("#irole").value });
     $("#icode").innerHTML = `<div class="card pad small">Invite (${esc(r.role)}, 7 days, single use):<br><code>${esc(r.code)}</code><br><span class="mute">It contains the team's encryption key. Send it privately.</span></div>`; }
-  catch (e) { alert(e.message); }
+  catch (e) { notice(e.message, true); }
 }
 
 async function renderActivity() {
   if (!canAdmin()) { $("#body").innerHTML = `<p class="mute">Only owners and admins can see team activity.</p>`; return; }
   const rows = await api("GET", "/audit");
   const name = id => (S.profiles.find(p => p.id === id) || {}).name || (id ? "#" + id : "");
-  $("#body").innerHTML = `<div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>Profile</th><th>Detail</th></tr>
+  $("#body").innerHTML = `<div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>Account</th><th>Detail</th></tr>
     ${rows.map(a => `<tr><td class="small">${new Date(a.at*1000).toLocaleString()}</td><td class="small">${esc(a.email)}</td>
       <td>${esc(a.action)}</td><td>${esc(name(a.profile_id))}</td><td class="small mute">${esc(a.detail)}</td></tr>`).join("")}</table></div>`;
 }
@@ -477,15 +547,15 @@ async function renderOverview() {
   const tile = (label, value, sub) => `<div class="card pad" style="min-width:150px"><div class="mute small">${label}</div><div style="font-size:26px;font-weight:600">${value}</div>${sub ? `<div class="mute small">${sub}</div>` : ""}</div>`;
   $("#body").innerHTML = `
   <div class="row" style="flex-wrap:wrap;gap:12px">
-    ${tile("Profiles", o.profiles)}
+    ${tile("Accounts", o.profiles)}
     ${tile("Members", o.members, o.members_without_key.length ? `${o.members_without_key.length} without a key` : "all have keys")}
     ${tile("Running now", o.running.length)}
     ${tile("Stored data", mb + " MB", o.versions + " snapshots")}
     ${tile("Open invites", o.open_invites)}
     ${tile("Key epoch", o.key_epoch, o.rotating ? "rotating…" : (o.last_rotation ? "rotated " + new Date(o.last_rotation*1000).toLocaleDateString() : "never rotated"))}
   </div>
-  ${o.members_without_key.length ? `<div class="banner" style="margin-top:14px"><div><b>${o.members_without_key.length} member(s) have no encryption key.</b> <span class="mute">${o.members_without_key.map(esc).join(", ")} — they can't open profiles. After they sign in once, rotate the key to grant access.</span></div></div>` : ""}
-  <div class="section"><h3>Running now</h3><div class="card"><table><tr><th>Profile</th><th>Who</th><th>Device</th></tr>
+  ${o.members_without_key.length ? `<div class="banner" style="margin-top:14px"><div><b>${o.members_without_key.length} member(s) have no encryption key.</b> <span class="mute">${o.members_without_key.map(esc).join(", ")} — they can't open accounts. After they sign in once, rotate the key to grant access.</span></div></div>` : ""}
+  <div class="section"><h3>Running now</h3><div class="card"><table><tr><th>Account</th><th>Who</th><th>Device</th></tr>
     ${o.running.map(r => `<tr><td>${esc(r.name)}</td><td class="small">${esc(r.email)}</td><td class="small">${esc(r.device)}</td></tr>`).join("") || `<tr><td colspan="3" class="mute">Nothing running.</td></tr>`}
   </table></div></div>
   <div class="section"><h3>Recent activity</h3><div class="card"><table>
@@ -568,7 +638,7 @@ async function pgRefresh(force) {
 function pgBar() {
   const st = PG.st, el = $("#pgbar"); if (!el || !st) return;
   const on = st.state !== "idle", last = (st.log || []).slice(-1)[0];
-  el.innerHTML = `<span class="pill ${on ? "run" : ""}">🕊 ${esc(pigeonWords(st))}</span>
+  el.innerHTML = `<span class="pill ${on ? "run" : ""}">${esc(pigeonWords(st))}</span>
     ${on ? `<button class="b d" onclick="pgGo(()=>pgApi('stop'),'stopping…')">Stop</button>` : ""}
     <span class="mute small"> looked at ${st.stats.scanned} · found ${people(st.stats.leads)} · sent ${msgs(st.stats.dms)} · ${st.daily.count} today${st.central ? " · team history: on" : ""}</span>
     ${st.central ? "" : `<div class="err small">Team history is OFF: this account can't see who your other accounts already messaged.</div>`}
@@ -591,21 +661,21 @@ function pgLeads(busy) {
   const L = PG.leads || [], shown = L.filter(l => PG.filter === "all" || l.status === PG.filter);
   const sts = ["all", "queued", "draft", "ready", "sent", "replied", "failed", "skipped"];
   return `<div class="row" style="margin-bottom:8px">
-    <select onchange="PG.filter=this.value;pgRender()">${sts.map(s => `<option value="${s}" ${PG.filter === s ? "selected" : ""}>${s === "all" ? "everyone" : LEAD_WORDS[s]}</option>`).join("")}</select>
+    <select aria-label="Show" onchange="PG.filter=this.value;pgRender()">${sts.map(s => `<option value="${s}" ${PG.filter === s ? "selected" : ""}>${s === "all" ? "everyone" : LEAD_WORDS[s]}</option>`).join("")}</select>
     <button class="b" onclick="pgGo(()=>pgOp('lead_write',{all:true}))">Write all queued</button>
-    <button class="b" onclick="pgGo(()=>pgOp('lead_approve',{all:true}))">Approve all drafts</button>
+    <button class="b" onclick="if(confirm('Approve every draft? Approved messages are sent the next time the agent runs in a sending mode.'))pgGo(()=>pgOp('lead_approve',{all:true}))">Approve all drafts</button>
     <button class="b" onclick="pgExport()">Export CSV</button>
     <button class="b d" onclick="if(confirm('Delete ALL leads?'))pgGo(()=>pgOp('leads_clear'))">Clear all</button></div>
   ${shown.slice(0, 100).map(l => { const u = esc(l.username), sent = l.status === "sent" || l.status === "replied";
     return `<div class="card" style="padding:10px;margin-bottom:8px"><div class="row"><a href="https://www.reddit.com/user/${u}" target="_blank"><b>u/${u}</b></a>
       <span class="pill">${l.fit}</span><span class="pill">${esc(LEAD_WORDS[l.status] || l.status)}</span><span class="mute small">${l.subreddit ? "r/" + esc(l.subreddit) : ""}</span></div>
       <div class="small mute">${esc(l.reason)}${l.error ? ` <span class="err">· ${esc(l.error)}</span>` : ""}</div>
-      ${l.message || PG.edit[l.username] != null ? `<textarea style="width:100%;min-height:70px" ${sent ? "disabled" : ""} oninput="PG.edit['${u}']=this.value">${esc(PG.edit[l.username] ?? l.message)}</textarea>` : ""}
+      ${l.message || PG.edit[l.username] != null ? `<textarea aria-label="Message to u/${u}" style="width:100%;min-height:70px" ${sent ? "disabled" : ""} oninput="PG.edit['${u}']=this.value">${esc(PG.edit[l.username] ?? l.message)}</textarea>` : ""}
       <div class="row" style="margin-top:6px">
         ${PG.edit[l.username] != null ? `<button class="b p" onclick="pgSave('${u}')">Save</button>` : ""}
         ${l.status === "queued" || l.status === "failed" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_write',{username:'${u}'}))">Write message</button>` : ""}
         ${l.status === "draft" ? `<button class="b p" onclick="pgGo(()=>pgOp('lead_approve',{username:'${u}'}))">Approve</button>` : ""}
-        ${l.status === "draft" || l.status === "ready" ? `<button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('send',{username:'${u}'}),'sending…')">Send now</button>` : ""}
+        ${l.status === "draft" || l.status === "ready" ? `<button class="b p" ${busy ? "disabled" : ""} onclick="if(confirm('Send this message to u/${u} now, from this account?'))pgGo(()=>pgJob('send',{username:'${u}'}),'sending…')">Send now</button>` : ""}
         ${l.status === "sent" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_replied',{username:'${u}'}))">Mark replied</button>` : ""}
         ${!sent && l.status !== "skipped" ? `<button class="b" onclick="pgGo(()=>pgOp('lead_skip',{username:'${u}'}))">Skip</button>` : ""}</div></div>`; }).join("") || `<div class="mute">No leads here. Run the agent in “find” mode, scan a page, or import a list.</div>`}
   <h4>Add people by username</h4><div class="mute small">One username per line. People your team already contacted are skipped.</div>
@@ -620,12 +690,12 @@ async function pgExport() {
 
 function pgRun(busy) {
   return `<div class="card" style="padding:12px"><b>Start the agent</b><div class="row" style="margin-top:8px">
-      <select id="pgmode"><option value="find">Find people (sends nothing)</option><option value="dm">Send approved messages</option><option value="full">Find people + message them</option></select>
-      <input id="pgmin" type="number" placeholder="how many minutes (optional)" style="width:200px">
-      <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('run',{mode:$('#pgmode').value,minutes:parseFloat($('#pgmin').value)||null}),'started')">▶ Start</button></div>
+      <select id="pgmode" aria-label="What should the agent do?"><option value="find">Find people (sends nothing)</option><option value="dm">Send approved messages</option><option value="full">Find people + message them</option></select>
+      <input id="pgmin" type="number" aria-label="How many minutes (optional)" placeholder="how many minutes (optional)" style="width:200px">
+      <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('run',{mode:$('#pgmode').value,minutes:parseFloat($('#pgmin').value)||null}),'started')">Start</button></div>
       <div class="mute small" style="margin-top:6px">The agent works in its own tab; your tabs are left alone. DMs and comments go through the daily cap and the team's shared memory.</div></div>
     <div class="card" style="padding:12px;margin-top:10px"><b>Add the people on this page</b><div class="mute small">Adds everyone on the Reddit page you're looking at to the list.</div>
-      <label class="small"><input type="checkbox" id="pgns"> skip AI scoring</label>
+      <label class="small" for="pgns"><input type="checkbox" id="pgns"> skip AI scoring</label>
       <button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('scan',{no_score:$('#pgns').checked}),'scanning…')">Queue everyone on this page</button></div>
     <div class="card" style="padding:12px;margin-top:10px"><button class="b" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('replies'),'checking…')">Check replies</button></div>
     <div class="card" style="padding:12px;margin-top:10px"><b>Check that Reddit works with the agent</b>
@@ -638,7 +708,7 @@ function pgComments(busy) {
   const O = PG.opps || [], I = PG.ideas || [];
   return `<h4>Comment opportunities</h4>` + (O.map(o => `<div class="card" style="padding:10px;margin-bottom:8px"><div class="row"><b>r/${esc(o.subreddit)}</b> ${esc(o.title)}
       <span class="pill">${esc(o.status)}</span><a class="small" href="${esc(o.post_url)}" target="_blank">thread ↗</a></div><div class="small mute">${esc(o.why)}</div>
-      <pre class="log">${esc(o.draft)}</pre>${o.status === "pending" ? `<div class="row"><button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('post',{id:${JSON.stringify(o.id).replace(/"/g, "&quot;")}}),'posting…')">Approve &amp; post</button>
+      <pre class="log">${esc(o.draft)}</pre>${o.status === "pending" ? `<div class="row"><button class="b p" ${busy ? "disabled" : ""} onclick="if(confirm('Post this comment in r/${esc(o.subreddit)} now, from this account?'))pgGo(()=>pgJob('post',{id:${JSON.stringify(o.id).replace(/"/g, "&quot;")}}),'posting…')">Approve &amp; post</button>
       <button class="b" onclick="pgGo(()=>pgOp('opp_skip',{id:${JSON.stringify(o.id).replace(/"/g, "&quot;")}}))">Skip</button></div>` : ""}</div>`).join("") || `<div class="mute">None yet. They're drafted while the agent browses.</div>`) +
     `<h4>Post ideas</h4><button class="b" onclick="pgGo(()=>pgOp('ideas_generate'),'writing ideas…')">Generate 5 post ideas</button>` +
     I.map(i => `<div class="card" style="padding:10px;margin:8px 0"><b>r/${esc(i.subreddit)}</b> — ${esc(i.title)}<pre class="log">${esc(i.body)}</pre><div class="small mute">${esc(i.angle)}</div>
@@ -657,28 +727,28 @@ function pgMessages() {
     <h4>Template</h4><div class="mute small">{Hey|Hi|Hello} {name}, … — variables: {name} {subreddit} {topic}</div>
     <textarea id="pgtpl" style="width:100%;min-height:110px">${esc(t.template || "")}</textarea>
     <div class="row"><button class="b p" onclick="pgGo(()=>pgOp('template_set',{body:$('#pgtpl').value}),'saved')">Save</button>
-      <select id="pgint"><option>light</option><option selected>medium</option><option>heavy</option></select>
-      <button class="b" onclick="pgGo(()=>pgOp('template_spin',{intensity:$('#pgint').value}).then(r=>({out:'✨ spun. '+r.out})))">✨ Add spintax with AI</button>
+      <select id="pgint" aria-label="Spintax amount"><option>light</option><option selected>medium</option><option>heavy</option></select>
+      <button class="b" onclick="pgGo(()=>pgOp('template_spin',{intensity:$('#pgint').value}).then(r=>({out:'Spun. '+r.out})))">Add spintax with AI</button>
       <button class="b" onclick="pgGo(()=>pgOp('template_preview',{n:4}))">Preview variations</button>
       ${t.undo ? `<button class="b" onclick="pgGo(()=>pgOp('template_undo'),'restored')">Undo AI spin</button>` : ""}</div>`;
 }
 
 function pgSetup(busy) {
   const p = PG.product, S_ = PG.subs || [];
-  return `<div class="row"><input id="pgurl" placeholder="https://your-product.com" style="flex:1" value="${esc(p ? p.url : "")}">
+  return `<div class="row"><input id="pgurl" aria-label="Your product's website" placeholder="https://your-product.com" style="flex:1" value="${esc(p ? p.url : "")}">
       <button class="b p" ${busy ? "disabled" : ""} onclick="pgGo(()=>pgJob('setup',{url:$('#pgurl').value}),'analyzing + finding subreddits…')">${p ? "Re-analyze" : "Analyze my product"}</button></div>
     ${p ? `<div class="card small" style="padding:10px;margin:8px 0"><b>${esc(p.name)}</b> — ${esc(p.summary)}<br><span class="mute">ICP:</span> ${esc(p.icp)}<br><span class="mute">Offer:</span> ${esc(p.offer)}</div>` : ""}
     <h4>Subreddits</h4><div class="row"><button class="b" ${busy || !p ? "disabled" : ""} onclick="pgGo(()=>pgJob('discover'),'finding subreddits…')">Re-run discovery</button>
-      <input id="pgadd" placeholder="add r/name" style="width:160px"><button class="b" onclick="pgGo(()=>pgOp('subs_edit',{add:[$('#pgadd').value]}),'')">Add</button></div>
-    <table style="margin-top:8px">${S_.map(x => `<tr><td><input type="checkbox" ${x.enabled ? "checked" : ""} onchange="pgGo(()=>pgOp('subs_edit',{[this.checked?'enable':'disable']:['${esc(x.name)}']}),'')"></td>
+      <input id="pgadd" aria-label="Add a subreddit" placeholder="add r/name" style="width:160px"><button class="b" onclick="pgGo(()=>pgOp('subs_edit',{add:[$('#pgadd').value]}),'')">Add</button></div>
+    <table style="margin-top:8px">${S_.map(x => `<tr><td><input type="checkbox" aria-label="Use r/${esc(x.name)}" ${x.enabled ? "checked" : ""} onchange="pgGo(()=>pgOp('subs_edit',{[this.checked?'enable':'disable']:['${esc(x.name)}']}),'')"></td>
       <td>r/${esc(x.name)}</td><td class="small">score ${x.score}</td><td class="small">rules: ${esc(x.rules_risk)}</td><td class="small mute">${esc(x.reason)}</td>
-      <td><button class="b" onclick="pgGo(()=>pgOp('subs_edit',{remove:['${esc(x.name)}']}),'')">✕</button></td></tr>`).join("") || `<tr><td class="mute">No subreddits yet.</td></tr>`}</table>`;
+      <td><button class="b" aria-label="Remove r/${esc(x.name)}" onclick="if(confirm('Remove r/${esc(x.name)} from the subreddits this account uses?'))pgGo(()=>pgOp('subs_edit',{remove:['${esc(x.name)}']}),'')">Remove</button></td></tr>`).join("") || `<tr><td class="mute">No subreddits yet.</td></tr>`}</table>`;
 }
 
 function pgSettings() {
   const s = PG.settings || {};
   return `<div style="display:grid;grid-template-columns:240px 1fr;gap:6px;max-width:560px">${Object.entries(s).filter(([k]) => k !== "warmup_start").map(([k, v]) =>
-    `<label class="small">${esc(SETTING_LABELS[k] || k)}</label>${typeof v === "boolean" ? `<input type="checkbox" data-k="${k}" ${v ? "checked" : ""}>` : `<input data-k="${k}" value="${esc(v)}">`}`).join("")}</div>
+    `<label class="small" for="set_${k}">${esc(SETTING_LABELS[k] || k)}</label>${typeof v === "boolean" ? `<input type="checkbox" id="set_${k}" data-k="${k}" ${v ? "checked" : ""}>` : `<input id="set_${k}" data-k="${k}" value="${esc(v)}">`}`).join("")}</div>
     <div class="row" style="margin-top:10px"><button class="b p" onclick="pgSaveSettings()">Save settings</button>
       <button class="b" onclick="pgGo(()=>pgOp('settings_set',{restart_warmup:true}),'warm-up restarted from today')">Restart warm-up from today</button></div>
     <div class="mute small" style="margin-top:6px">The DeepSeek key stays on this machine: <code>pigeon agent config --deepseek-key KEY</code>.</div>`;
@@ -705,7 +775,8 @@ function pgBrain() {
     <h4>Recent</h4><table>${b.events.map(e => `<tr><td class="small">${when(e.at)}</td><td>${esc(e.kind)}</td><td>${esc(e.status)}</td><td>${esc(e.profile || "-")}</td><td>r/${esc(e.subreddit || "-")}</td><td class="small">${esc((e.kind === "dm" ? e.target : e.title || e.target).slice(0, 70))}</td></tr>`).join("") || `<tr><td class="mute">Nothing yet.</td></tr>`}</table>`;
 }
 
-setInterval(() => { if (S && S.signed_in && tab === "profiles" && !$("#dlg").open && !document.querySelector(".menu.open")) load().catch(() => {}); }, 3000);
+// The 3-second refresh redraws #app; skip it while you're typing or have a menu or select open, so nothing is yanked away.
+setInterval(() => { if (S && S.signed_in && tab === "profiles" && !$("#dlg").open && !document.querySelector(".menu.open") && !editing()) load().catch(() => {}); }, 3000);
 </script>
 </body>
 </html>

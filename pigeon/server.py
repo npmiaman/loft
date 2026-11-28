@@ -293,10 +293,19 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
         return inv
 
     # ------------------------------------------------------------ auth
+    @app.get("/auth/status")
+    def auth_status():
+        """Lets a sign-in page open on "create the first account" for a brand-new server. Says only whether any account exists."""
+        with db.tx() as con:
+            return {"accounts": con.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] > 0, "open_signup": open_signup}
+
     @app.post("/auth/register")
     def register(body: Register):
         email = body.email.strip().lower()
         with db.tx() as con:
+            # an existing email is the more useful answer than "needs an invite": that person should sign in instead
+            if con.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+                raise HTTPException(409, "email already registered")
             first = con.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] == 0
             if not body.invite and not (open_signup or first):
                 raise HTTPException(403, "signup needs an invite")
@@ -336,6 +345,16 @@ def create_app(data_dir: str | Path | None = None, open_signup: Optional[bool] =
                                 "ON m.team_id=t.id WHERE m.user_id=? ORDER BY t.id", (user["id"],)).fetchall()
         return {**user, "pubkey": u["pubkey"], "privkey": u["privkey"],
                 "teams": [{**dict(t), "rotating": t["rotating_by"] is not None} for t in teams]}
+
+    @app.patch("/me")
+    def patch_me(body: dict, user=Depends(current_user)):
+        """Change your own display name. 1-80 characters after trimming."""
+        name = str(body.get("name") or "").strip()
+        if not name or len(name) > 80:
+            raise HTTPException(400, "Use a name between 1 and 80 characters.")
+        with db.tx() as con:
+            con.execute("UPDATE users SET name=? WHERE id=?", (name, user["id"]))
+        return {"ok": True, "name": name}
 
     @app.put("/me/keypair")
     def put_keypair(body: KeypairIn, user=Depends(current_user)):

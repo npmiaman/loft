@@ -117,7 +117,7 @@ def test_the_real_app_creates_launches_and_drives_pigeon(desktop, browser):
     # Run: with no DeepSeek key or product, the refusal reaches the user instead of failing silently
     page.click("#pg button:text-is('Run')")
     page.wait_for_selector("#pgmode")
-    page.click("#pg button:text-is('▶ Start')")
+    page.click("#pg button:text-is('Start')")
     page.wait_for_selector("#pg .err")
     assert any(w in page.inner_text("#pg .err") for w in ("DeepSeek key", "Set up the product"))
 
