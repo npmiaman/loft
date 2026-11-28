@@ -53,15 +53,20 @@ const leads = Object.entries(await sw.evaluate(() => chrome.storage.local.get(nu
 assert.deepEqual(leads.map((l) => l.username).sort(), ['dev_bob', 'founder_amy', 'reader_one'], 'only fit>=70 humans become leads (bot + low-fit excluded)');
 lap('browsed r/saas, scored people, created exactly the right leads');
 const amy = leads.find((l) => l.username === 'founder_amy');
-assert.equal(amy.status, 'sent', JSON.stringify(amy)); assert.ok(/^(Hey|Hi) founder_amy, saw your post in r\/saas about how do I find my first 10 customers\. (Happy to share|Glad to help) if useful\?$/.test(amy.message), amy.message);
-lap('highest-fit lead was DMed with a rendered, spun template: "' + amy.message + '"');
-assert.equal(leads.filter((l) => l.status === 'sent').length, 1, 'only one DM: the gap between DMs was enforced');
-assert.ok(final.stats.scanned >= 3 && final.stats.upvotes >= 1 && final.stats.dms === 1, JSON.stringify(final.stats));
+// P0-4 (owner decision): every message waits for approval, template included. Previously a template DM went straight out.
+assert.equal(amy.status, 'draft', JSON.stringify(amy)); assert.ok(/^(Hey|Hi) founder_amy, saw your post in r\/saas about how do I find my first 10 customers\. (Happy to share|Glad to help) if useful\?$/.test(amy.message), amy.message);
+lap('highest-fit lead got a rendered, spun template as a draft awaiting approval: "' + amy.message + '"');
+assert.equal(leads.filter((l) => l.status === 'sent').length, 0, 'nothing sent without approval');
+assert.ok(final.stats.scanned >= 3 && final.stats.upvotes >= 1 && final.stats.dms === 0, JSON.stringify(final.stats));
 lap(`stats ${JSON.stringify(final.stats)}`);
 const opps = await get('opportunities'); assert.equal(opps.length, 1); assert.equal(opps[0].status, 'pending');
 lap('drafted 1 comment opportunity, left pending for approval');
+// approve amy's draft, then a DM-only session sends exactly that one and the governor books it
+await sw.evaluate(async () => { const k = 'lead:founder_amy'; const l = (await chrome.storage.local.get(k))[k]; await chrome.storage.local.set({ [k]: { ...l, status: 'ready' } }); });
+await start('dm'); await waitIdle(120000);
+assert.equal((await get('lead:founder_amy')).status, 'sent');
 const daily = await get('daily'); assert.equal(daily.count, 1); assert.ok(daily.nextDmAt > Date.now() + 50000, 'next DM scheduled 60-90s out');
-lap('governor recorded the DM and scheduled the next one');
+lap('after approval, the DM went out; governor recorded it and scheduled the next one');
 assert.ok(log.some((l) => /DMs held|Waiting|Session finished/.test(l)));
 assert.equal((await ctx.pages()).length >= 1, true);
 

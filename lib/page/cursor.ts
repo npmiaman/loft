@@ -1,17 +1,37 @@
-import { AbortError, clamp, frame, gauss, isAborted, lognormal, rand, sleep, smoothScrollBy } from './human';
+import { AbortError, clamp, frame, gauss, isAborted, lognormal, rand, safeHud, sleep, smoothScrollBy } from './human';
 import { persona, t, tempo } from './persona';
 
+/**
+ * The `view` for synthetic mouse events. In a normal content script that is `window`, but in an isolated world such as
+ * Camoufox's, `window` is not a real Window and the MouseEvent constructor throws, so fall back to the document's own
+ * window, and finally to none (events still dispatch fine without one).
+ */
+const VIEW: Window | undefined = (() => {
+  for (const w of [window, document.defaultView]) {
+    try {
+      if (w) {
+        new MouseEvent('x', { view: w });
+        return w;
+      }
+    } catch { /* try the next candidate */ }
+  }
+  return undefined;
+})();
+
 const CSS = `
-:host{all:initial}
+:host{all:initial;--p-navy:#1C274C;--p-pink:#db2777;--p-pink-d:#be185d;--p-pink-l:#f9a8d4;--p-white:#fff;--p-focus:#fde68a}
 .cur{position:fixed;left:0;top:0;z-index:2147483647;pointer-events:none;will-change:transform;display:none}
 .cur svg{display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))}
-.chip{position:absolute;left:18px;top:20px;background:#db2777;color:#fff;font:600 11px/1 system-ui,sans-serif;padding:4px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25)}
-.rip{position:fixed;z-index:2147483646;pointer-events:none;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid #db2777;animation:rip .55s ease-out forwards}
+.chip{position:absolute;left:18px;top:20px;background:var(--p-pink);color:var(--p-white);font:600 11px/1 system-ui,sans-serif;padding:4px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.rip{position:fixed;z-index:2147483646;pointer-events:none;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid var(--p-pink);animation:rip .55s ease-out forwards}
 @keyframes rip{from{transform:scale(.4);opacity:.9}to{transform:scale(2.6);opacity:0}}
-.hud{position:fixed;right:16px;bottom:16px;z-index:2147483647;display:none;align-items:center;gap:10px;background:#1C274C;color:#fff;font:500 13px/1.2 system-ui,sans-serif;padding:9px 10px 9px 14px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.35);pointer-events:auto}
-.hud b{color:#f9a8d4}
-.hud button{all:unset;cursor:pointer;background:#db2777;color:#fff;font:700 12px system-ui,sans-serif;padding:6px 12px;border-radius:999px}
-.hud button:hover{background:#be185d}
+.hud{position:fixed;top:72px;left:50%;transform:translateX(-50%);max-width:min(560px,calc(100vw - 32px));z-index:2147483647;display:none;align-items:center;gap:10px;background:var(--p-navy);color:var(--p-white);font:500 13px/1.2 system-ui,sans-serif;padding:6px 6px 6px 14px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.3);pointer-events:auto}
+.hud .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hud b{color:var(--p-pink-l)}
+.hud .k{opacity:.75;font-size:11px;white-space:nowrap}
+.hud button{all:unset;cursor:pointer;background:var(--p-pink);color:var(--p-white);font:700 12px system-ui,sans-serif;padding:8px 14px;min-height:16px;border-radius:999px}
+.hud button:hover{background:var(--p-pink-d)}
+.hud button:focus-visible{outline:3px solid var(--p-focus);outline-offset:2px}
 `;
 
 function deepFromPoint(x: number, y: number): Element | null {
@@ -85,12 +105,16 @@ export class GhostCursor {
     this.root = this.host.attachShadow({ mode: 'closed' });
     this.root.innerHTML = `
       <style>${CSS}</style>
-      <div class="cur"><svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 21 L7.2 16.4 L10.6 24 L14 22.5 L10.7 15 L18 15 Z" fill="#1C274C" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="chip">🕊 Pigeon</span></div>
-      <div class="hud"><span class="t"></span><button>Stop</button></div>`;
+      <div class="cur"><svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2 L2 21 L7.2 16.4 L10.6 24 L14 22.5 L10.7 15 L18 15 Z" fill="var(--p-navy)" stroke="var(--p-white)" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="chip">Pigeon</span></div>
+      <div class="hud" role="status" aria-live="polite"><span class="t"></span><span class="k">Esc to stop</span><button type="button" aria-label="Stop Pigeon">Stop</button></div>`;
     this.cur = this.root.querySelector('.cur') as HTMLElement;
     this.hudEl = this.root.querySelector('.hud') as HTMLElement;
     this.hudText = this.root.querySelector('.t') as HTMLElement;
     (this.root.querySelector('.hud button') as HTMLElement).addEventListener('click', onStop);
+    // Esc stops the agent while the HUD is up. Only real key presses count: the agent's own synthetic keys are untrusted.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && e.isTrusted && this.hudEl.style.display === 'flex') onStop();
+    }, true);
     document.documentElement.appendChild(this.host);
     this.place();
   }
@@ -107,7 +131,7 @@ export class GhostCursor {
   hud(text: string) {
     if (!this.hudEl) return;
     this.hudEl.style.display = text ? 'flex' : 'none';
-    this.hudText.innerHTML = text;
+    this.hudText.innerHTML = safeHud(text);
     if (text) this.show();
     else this.hide();
   }
@@ -173,7 +197,7 @@ export class GhostCursor {
       if (now - lastHover > rand(40, 90)) {
         lastHover = now;
         deepFromPoint(this.x, this.y)?.dispatchEvent(
-          new MouseEvent('mousemove', { bubbles: true, composed: true, clientX: this.x, clientY: this.y, view: window }),
+          new MouseEvent('mousemove', { bubbles: true, composed: true, clientX: this.x, clientY: this.y, view: VIEW }),
         );
       }
       if (x >= 1) break;
@@ -200,7 +224,7 @@ export class GhostCursor {
     const tx = clamp(r.left + r.width * rand(0.15, 0.65), r.left + 3, r.right - 3);
     const ty = clamp(r.top + r.height * rand(0.25, 0.65), r.top + 3, r.bottom - 3);
     await this.moveTo(tx, ty);
-    const base = { bubbles: true, composed: true, clientX: tx, clientY: ty, view: window };
+    const base = { bubbles: true, composed: true, clientX: tx, clientY: ty, view: VIEW };
     el.dispatchEvent(new MouseEvent('mouseover', base));
     el.dispatchEvent(new MouseEvent('mouseenter', { ...base, bubbles: false }));
   }
@@ -224,7 +248,7 @@ export class GhostCursor {
     }
     await sleep(Math.max(60, t(rand(110, 260), 0.5))); // settle before pressing; sometimes a long look first
     if (Math.random() < 0.06) await sleep(t(600, 0.6));
-    const base = { bubbles: true, cancelable: true, composed: true, clientX: this.x, clientY: this.y, view: window, button: 0 };
+    const base = { bubbles: true, cancelable: true, composed: true, clientX: this.x, clientY: this.y, view: VIEW, button: 0 };
     const ptr = { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true };
     el.dispatchEvent(new PointerEvent('pointerdown', { ...ptr, buttons: 1 }));
     el.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons: 1 }));
@@ -264,7 +288,7 @@ export class GhostCursor {
       if (!el || unsafeTarget(el)) continue;
       await this.moveTo(x, y);
       await sleep(Math.max(50, t(rand(90, 260), 0.5)));
-      const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window, button: 0 };
+      const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: VIEW, button: 0 };
       el.dispatchEvent(new MouseEvent('mousedown', { ...base, buttons: 1 }));
       this.ripple(x, y);
       await sleep(clamp(lognormal(85, 0.38), 38, 240));

@@ -1,8 +1,11 @@
 // The agent loop. Runs in the service worker and drives one dedicated Reddit window through the content script.
 import * as store from './storage';
-import { getLead, getSettings, listLeads, patchLead, putLead } from './storage';
+import { getContacted, getLead, getSettings, isKnown, listLeads, markContacted, patchLead, putLead } from './storage';
+import { WRITTEN_STATUS } from './safety';
 import { draftComment, renderTemplate, scoreItems, writeDm, type ScoreItem, type ScoreResult } from './brain';
 import { checkDm, inActiveHours, pauseFor, recordDm } from './governor';
+import { planStatus } from './sop/plan';
+import { commitItem, getWarmup, runWarmup, type Io } from './sop/run';
 import type { AgentState, CommentData, DmResult, Lead, PostData, Product, RunMode, Settings, Subreddit } from './types';
 
 class Stop extends Error {}
@@ -157,10 +160,12 @@ async function ingest(
   if (!fresh.length) return out;
   const results = await scoreItems(product, fresh);
   await bump('scanned', fresh.length);
+  const contacted = await getContacted();
   for (const r of results) {
     out.set(r.id, r);
     const e = fresh.find((x) => x.id === r.id);
     if (!e || !r.dm_ok || r.fit < s.minFit) continue;
+    if (contacted.has(e.author.toLowerCase())) continue; // already messaged once: never queue them again
     const existing = await getLead(e.author);
     if (existing && (existing.status !== 'queued' || existing.fit >= r.fit)) continue;
     await putLead({
@@ -297,14 +302,19 @@ async function prepareQueued(product: Product, s: Settings, max: number) {
       continue;
     }
     if (!message) continue;
-    const needsApproval = useAi && s.approveAiDrafts;
-    await patchLead(l.username, { message, status: needsApproval ? 'draft' : 'ready' });
-    store.log('info', needsApproval ? `Draft ready for approval: u/${l.username}` : `Message ready: u/${l.username}`);
+    // Every message waits for approval, whoever wrote it (AI, template, page scan, import).
+    await patchLead(l.username, { message, status: WRITTEN_STATUS });
+    store.log('info', `Draft waiting for your approval: u/${l.username}`);
   }
 }
 
 let consecutiveFails = 0;
 async function sendDm(lead: Lead): Promise<void> {
+  if ((await getContacted()).has(lead.username.toLowerCase())) {
+    store.log('warn', `Skipped u/${lead.username}: already messaged before.`);
+    await patchLead(lead.username, { status: 'skipped', error: 'Already messaged before' });
+    return;
+  }
   await upd({ phase: 'messaging', subreddit: '' });
   store.log('info', `DMing u/${lead.username}`);
   await hud(`🕊 Messaging <b>u/${lead.username}</b>`);
@@ -318,6 +328,7 @@ async function sendDm(lead: Lead): Promise<void> {
   if (res.ok) {
     consecutiveFails = 0;
     await patchLead(lead.username, { status: 'sent', sentAt: Date.now(), error: undefined });
+    await markContacted(lead.username);
     await recordDm();
     await bump('dms');
     store.log('ok', `Sent DM to u/${lead.username}`);
@@ -327,17 +338,17 @@ async function sendDm(lead: Lead): Promise<void> {
   await patchLead(lead.username, { status: res.code === 'blocked' ? 'skipped' : 'failed', error: res.error ?? res.code });
   store.log('error', `DM to u/${lead.username} failed: ${res.error ?? res.code}`);
   if (res.code === 'rate-limit') {
-    await pauseFor(6 * 3_600_000);
+    await pauseFor(6 * 3_600_000, 'Reddit is rate limiting DMs');
     store.log('warn', 'Reddit is rate limiting DMs. Paused DMs for 6 hours.');
     throw new Stop();
   }
   if (res.code === 'captcha') {
-    await pauseFor(24 * 3_600_000);
+    await pauseFor(24 * 3_600_000, 'Reddit showed a captcha. Solve it in the Pigeon window first');
     store.log('warn', 'Captcha shown. Paused for 24h — solve it manually in the Pigeon window, then resume.');
     throw new Stop();
   }
   if (res.code !== 'blocked' && ++consecutiveFails >= 3) {
-    await pauseFor(3_600_000);
+    await pauseFor(3_600_000, 'Three DMs failed in a row. Reddit\u2019s chat may have changed');
     store.log('warn', 'DM flow failed 3 times in a row — Reddit’s chat UI may have changed. Stopping. Check the log.');
     throw new Stop();
   }
@@ -365,11 +376,33 @@ async function dmTick(product: Product, s: Settings, max: number): Promise<boole
   return false;
 }
 
+// ---------------------------------------------------------------- SOP warm-up plumbing
+async function currentUrl(): Promise<string> {
+  return tabId == null ? '' : ((await chrome.tabs.get(tabId)).url ?? '');
+}
+
+function warmupIo(product: Product | null, s: Settings): Io {
+  return {
+    check, wait, cmd, navigate, clickNav, hud, url: currentUrl, upd, bump,
+    // true once DMs are finished for this session: blocked by a gate, or nothing left to send
+    dm: async () => {
+      if (!product) return true;
+      if (await dmTick(product, s, 1)) return true;
+      return !(await listLeads()).some((l) => l.status === 'ready' || l.status === 'queued');
+    },
+  };
+}
+
 // ---------------------------------------------------------------- session
 async function runSession(mode: RunMode) {
   const s = await getSettings();
   const product = await store.get('product');
   const subs = await store.get('subreddits');
+  if (mode === 'warmup') {
+    await ensureTab();
+    await runWarmup(warmupIo(product, s), s.sessionMinutes);
+    return;
+  }
   if (mode !== 'dm') {
     if (!product) throw new Error('Set up your product first (Setup tab).');
     if (!subs.some((x) => x.enabled)) throw new Error('No subreddits enabled. Find subreddits in the Setup tab.');
@@ -421,7 +454,7 @@ export async function startAgent(mode: RunMode): Promise<{ ok: boolean; error?: 
   consecutiveFails = 0;
   state = { ...store.EMPTY_AGENT, running: true, mode, phase: 'starting', startedAt: Date.now() };
   await store.set('agent', state);
-  keepalive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 20_000);
+  keepalive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 10_000);
   store.log('info', `Session started (${mode})`);
 
   (async () => {
@@ -431,8 +464,10 @@ export async function startAgent(mode: RunMode): Promise<{ ok: boolean; error?: 
     } catch (e) {
       if (e instanceof Stop) store.log('info', 'Stopped');
       else {
-        store.log('error', (e as Error).message ?? String(e));
+        const m = (e as Error).message ?? String(e);
+        store.log('error', m);
         await bump('errors');
+        await upd({ lastError: m });
       }
     } finally {
       if (keepalive) clearInterval(keepalive);
@@ -455,7 +490,7 @@ async function exclusive<T>(label: string, fn: () => Promise<T>): Promise<T> {
   if (running) throw new Error('The agent is busy. Stop it first.');
   running = true;
   stopFlag = false;
-  keepalive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 20_000);
+  keepalive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 10_000);
   try {
     return await fn();
   } catch (e) {
@@ -473,6 +508,7 @@ export async function sendLeadNow(username: string) {
   return exclusive('Send DM', async () => {
     const lead = await getLead(username);
     if (!lead?.message) throw new Error('No message written for this lead yet.');
+    if (lead.status !== 'ready') throw new Error('Approve this message before sending it.');
     const g = await checkDm();
     if (!g.ok) throw new Error(g.reason);
     await sendDm(lead);
@@ -491,6 +527,19 @@ export async function postOpportunity(id: string) {
     await store.set('opportunities', (await store.get('opportunities')).map((x) => (x.id === id ? { ...x, status: r.ok ? 'posted' : 'failed' } : x)));
     if (!r.ok) throw new Error(r.error ?? 'Comment failed');
     store.log('ok', `Comment posted in r/${o.subreddit}`);
+  });
+}
+
+/** Approve button on a drafted warm-up comment/post. */
+export async function postWarmupItem(id: string) {
+  return exclusive('Warm-up post', async () => {
+    const item = (await store.get('warmupItems')).find((x) => x.id === id);
+    if (!item) throw new Error('Draft not found');
+    if (item.status === 'posted') throw new Error('Already posted');
+    const w = await getWarmup();
+    if (!w.plan) throw new Error('No warm-up plan.');
+    const ok = await commitItem(warmupIo(await store.get('product'), await getSettings()), item);
+    if (!ok) throw new Error((await store.get('warmupItems')).find((x) => x.id === id)?.error ?? 'Failed');
   });
 }
 
@@ -524,7 +573,7 @@ export async function scanActivePage(skipScoring: boolean): Promise<{ added: num
   let added = 0;
   if (skipScoring) {
     for (const it of items) {
-      if (it.username.toLowerCase() === s.myUsername.toLowerCase() || (await getLead(it.username))) continue;
+      if (it.username.toLowerCase() === s.myUsername.toLowerCase() || (await isKnown(it.username))) continue;
       await putLead({ ...it, fit: 50, intent: 'unscored', reason: 'Added from page scan', status: 'queued', source: 'page', createdAt: Date.now() });
       added++;
     }
@@ -541,6 +590,20 @@ export async function scanActivePage(skipScoring: boolean): Promise<{ added: num
 
 export async function scheduledTick() {
   const s = await getSettings();
+  // An enabled SOP plan that is still in progress takes over scheduling: its own sessions-per-day, warm-up sessions only.
+  const w = await getWarmup();
+  if (w.enabled && w.plan && w.startedAt) {
+    const st = planStatus(w.plan, w.startedAt, (await store.get('warmupDaily'))?.karma ?? null);
+    if (st.state === 'active') {
+      if (running || !inActiveHours(s)) return;
+      const d = await store.getDaily();
+      if (d.sessions >= w.plan.sessionsPerDay) return;
+      await store.patchDaily({ sessions: d.sessions + 1 });
+      store.log('info', `Scheduled warm-up session ${d.sessions + 1}/${w.plan.sessionsPerDay} (day ${st.day}, ${st.phase.name})`);
+      await startAgent('warmup');
+      return;
+    }
+  }
   if (!s.autoSchedule || running || !inActiveHours(s)) return;
   const d = await store.getDaily();
   if (d.sessions >= s.sessionsPerDay || d.pausedUntil > Date.now()) return;

@@ -2,3 +2,8 @@ node_modules
 .output
 .wxt
 *.log
+public/ocr
+
+# separate repo (npmiaman/loft) and a local backup
+loft/
+loft-pre-merge-backup/

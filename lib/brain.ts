@@ -63,7 +63,7 @@ export const productBrief = (p: Product) =>
   `BUYING SIGNALS: ${p.buyingSignals.join(' | ')}\nCOMPETITORS: ${p.competitors.join(', ')}`;
 
 // ---------------------------------------------------------------- subreddit discovery
-async function redditJson(path: string): Promise<any> {
+export async function redditJson(path: string): Promise<any> {
   const sep = path.includes('?') ? '&' : '?';
   const res = await fetch(`https://www.reddit.com${path}${sep}raw_json=1`, {
     credentials: 'include',

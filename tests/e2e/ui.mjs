@@ -45,14 +45,16 @@ await page.screenshot({ path: '/tmp/pigeon-run.png' });
 assert.ok(await page.getByText('Run the agent').isVisible()); console.log('✓ panel renders (Run tab)');
 
 // ---- Messages: spintax writer with validation + retry
-await page.getByRole('button', { name: 'Messages' }).click();
-await page.locator('textarea').nth(0).fill('Hey {name}, saw your post in r/{subreddit} about {topic}. Happy to share if useful?');
+// P3-1: the template now lives in Setup (was its own Messages tab)
+await page.locator('nav.tabs').getByRole('button', { name: 'Setup' }).click();
+const tpl = page.locator('textarea.tall');
+await tpl.fill('Hey {name}, saw your post in r/{subreddit} about {topic}. Happy to share if useful?');
 assert.ok(await page.getByText('No spintax yet').isVisible()); console.log('✓ warns that a plain template has no variation');
 await page.getByRole('button', { name: /Add spintax with AI/ }).click();
 await page.getByText(/can render/).waitFor({ timeout: 10000 });
 assert.equal(seen.spin, 2, 'first (invalid) answer rejected, second accepted');
 assert.ok(seen.bodies.find((b) => b.messages[0].content.includes('previous attempt was rejected: lost variable {name}')), 'retry prompt carried the validator feedback');
-const text = await page.locator('textarea').nth(0).inputValue();
+const text = await tpl.inputValue();
 assert.ok(text.includes('{name}') && /\{Hey\|Hi\|Hello\}/.test(text)); 
 console.log('✓ spintax writer: rejected output that dropped {name}, retried with feedback, accepted valid one');
 console.log('   variants:', (await page.getByText(/can render/).innerText()));
@@ -63,15 +65,14 @@ const previews = await page.locator('.preview').allInnerTexts();
 assert.ok(previews.every((p) => !/\?\./.test(p)), 'no stray ?. from topic'); assert.ok(previews.length >= 3 && new Set(previews).size === previews.length && previews.every((p) => !/[{}|]/.test(p) && p.includes('alex_dev')), previews.join('\n'));
 console.log('✓ previews render distinct, fully-filled messages:\n   - ' + previews.slice(0, 3).join('\n   - '));
 await page.getByRole('button', { name: 'Undo AI spin' }).click();
-assert.ok((await page.locator('textarea').nth(0).inputValue()).startsWith('Hey {name}')); console.log('✓ undo restores the original');
+assert.ok((await tpl.inputValue()).startsWith('Hey {name}')); console.log('✓ undo restores the original');
 await page.getByRole('button', { name: /Add spintax with AI/ }).click(); await page.getByText(/can render/).waitFor();
 await page.screenshot({ path: '/tmp/pigeon-messages.png' });
 
 // ---- Setup: subreddit discovery (real fetch path, mocked Reddit + DeepSeek)
-await page.getByRole('button', { name: 'Setup' }).click();
 await page.getByRole('button', { name: 'Find subreddits' }).click();
 for (let i = 0; i < 60; i++) { const n = await sw.evaluate(async () => ((await chrome.storage.local.get('subreddits')).subreddits ?? []).length); if (n) break; await new Promise((r) => setTimeout(r, 500)); }
-console.log('page errors/status:', JSON.stringify(await page.locator('.err, .card:has-text("⏳")').allInnerTexts()));
+console.log('page errors/status:', JSON.stringify(await page.locator('.notice').allInnerTexts()));
 const subs = await sw.evaluate(async () => (await chrome.storage.local.get('subreddits')).subreddits);
 console.log('✓ discovery:', subs.map((s) => `${s.name} score=${s.score} risk=${s.rulesRisk} on=${s.enabled}`).join(' | '));
 assert.equal(subs.find((s) => s.name === 'entrepreneur').enabled, false, 'high-risk rules => disabled by default');

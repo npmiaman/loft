@@ -99,3 +99,14 @@ export async function waitFor<T>(fn: () => T | null | undefined | false, timeout
     await sleep(every);
   }
 }
+
+
+/**
+ * HUD text may carry untrusted strings (Reddit post titles, usernames), and the HUD is rendered as HTML so we can bold the
+ * subject. Escape everything, then give back only the bare <b> and </b> we use ourselves. Nothing else can become markup.
+ */
+export function safeHud(text: string): string {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    .replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>');
+}

@@ -21,7 +21,6 @@ export interface Settings {
   maxUpvotesPerSession: number;
   // DMs
   dmMode: 'template' | 'ai';
-  approveAiDrafts: boolean; // AI drafts wait for approval before sending
   aiGuidance: string; // extra instructions appended to the DM-writer prompt
   autoSchedule: boolean; // run sessions on a schedule inside active hours
   sessionsPerDay: number;
@@ -122,9 +121,10 @@ export interface AgentState {
   subreddit: string;
   startedAt: number;
   stats: Stats;
+  lastError?: string; // why the last session ended early, shown on the run card
 }
 
-export type RunMode = 'full' | 'find' | 'dm';
+export type RunMode = 'full' | 'find' | 'dm' | 'warmup';
 
 export interface LogLine {
   t: number;
@@ -138,6 +138,7 @@ export interface Daily {
   sessions: number;
   nextDmAt: number;
   pausedUntil: number;
+  pauseReason?: string; // why DMs were paused (rate limit, captcha, repeated failures)
 }
 
 // ---- content-script protocol ----
@@ -172,4 +173,93 @@ export interface DmResult {
     | 'captcha'
     | 'unknown';
   error?: string;
+}
+
+// ---- SOP-driven warm-up ----
+/** Everything Pigeon can actually do on Reddit. The SOP compiler may only schedule these; anything else becomes a manual step. */
+export type WarmupAction = 'browse' | 'upvote' | 'comment' | 'post' | 'join' | 'dm';
+
+/** Per-day ceilings for one phase. browse is minutes of reading; the rest are counts. */
+export interface WarmupQuota {
+  browse: number;
+  upvote: number;
+  comment: number;
+  post: number;
+  join: number;
+  dm: number;
+}
+
+export interface WarmupPhase {
+  name: string;
+  fromDay: number; // account day, 1-based, inclusive
+  toDay: number; // inclusive
+  goal: string;
+  quota: WarmupQuota;
+  minKarma?: number; // stay in the earlier phase until the account has this much karma
+  notes: string;
+}
+
+/** Subreddit-specific behaviour straight from the SOP (e.g. "only read r/SaaS until day 5, then comment"). */
+export interface WarmupSub {
+  name: string;
+  fromDay: number;
+  actions: WarmupAction[]; // what may be done there (always intersected with the phase quota)
+  notes: string;
+}
+
+export interface WarmupPlan {
+  name: string;
+  summary: string;
+  phases: WarmupPhase[];
+  subreddits: WarmupSub[];
+  voice: string; // how comments/posts should read
+  rules: string[]; // hard rules for everything written
+  avoid: string[];
+  sessionsPerDay: number;
+  manualSteps: string[]; // SOP steps Pigeon can't do itself
+  assumptions: string[]; // things the compiler had to guess: shown so the user can fix them
+  warnings: string[]; // e.g. quotas lowered to Pigeon's safety ceiling
+  builtAt: number;
+}
+
+export interface SopDoc {
+  id: string;
+  name: string;
+  via: string; // how the text was read: text, pdf, pdf-ocr, image-ocr, docx, ...
+  chars: number;
+  text: string;
+  addedAt: number;
+  note?: string; // e.g. "pages 13-40 skipped"
+}
+
+export interface WarmupState {
+  enabled: boolean; // scheduled sessions run the warm-up while the plan is in progress
+  startedAt: number; // epoch ms of account day 1
+  docs: SopDoc[];
+  plan: WarmupPlan | null;
+  approval: 'review' | 'auto'; // review: drafted comments/posts wait for a click
+}
+
+export type WarmupCounts = WarmupQuota;
+
+export interface WarmupDaily {
+  date: string;
+  done: WarmupCounts;
+  targets: WarmupCounts; // today's randomised goal (60-100% of the ceiling), fixed for the day
+  phase: string;
+  karma: number | null; // account karma when the day started; null = couldn't be read
+}
+
+export interface WarmupItem {
+  id: string;
+  kind: 'comment' | 'post';
+  subreddit: string;
+  postUrl?: string; // comment: the thread to reply in
+  postTitle?: string;
+  title?: string; // post: its title
+  body: string;
+  why: string;
+  status: 'pending' | 'posted' | 'skipped' | 'failed';
+  error?: string;
+  createdAt: number;
 }

@@ -82,3 +82,19 @@ export async function chatJson<T>(o: Omit<ChatOpts, 'json'>): Promise<T> {
     throw new LlmError('Could not parse JSON from DeepSeek: ' + text.slice(0, 200));
   }
 }
+
+/** "Test key": one tiny request, no retries, so the user gets a clear answer fast. */
+export async function testKey(key: string, model: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+  if (!key) return { ok: false, error: 'No key entered' };
+  try {
+    const res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, stream: false, max_tokens: 1, thinking: { type: 'disabled' }, messages: [{ role: 'user', content: 'ping' }] }),
+    });
+    if (res.ok) return { ok: true };
+    return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}

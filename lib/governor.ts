@@ -1,34 +1,32 @@
 // Every DM goes through here: daily cap with warm-up ramp, active hours, jittered gaps, pauses.
 import { lognormal, rand, clamp } from './rand';
-import { getDaily, getSettings, patchDaily } from './storage';
+import { get, getDaily, getSettings, patchDaily } from './storage';
+import { dmCap, dmBlock, effectiveCap, inActiveHours } from './safety';
+import type { CapInfo } from './safety';
 import type { Settings } from './types';
 
-const RAMP = [5, 8, 12, 18, 25, 35, 45, 60]; // DMs/day by account-warm-up day
-
-export function effectiveCap(s: Settings, now = Date.now()): number {
-  if (!s.warmup) return s.dailyDmCap;
-  const day = Math.max(0, Math.floor((now - (s.warmupStart || now)) / 86_400_000));
-  return Math.min(s.dailyDmCap, RAMP[Math.min(day, RAMP.length - 1)] ?? 5);
-}
-
-export function inActiveHours(s: Settings, d = new Date()): boolean {
-  const h = d.getHours();
-  return s.activeStart < s.activeEnd ? h >= s.activeStart && h < s.activeEnd : h >= s.activeStart || h < s.activeEnd;
-}
+export { effectiveCap, inActiveHours };
 
 export type Gate =
   | { ok: true }
   | { ok: false; reason: string; waitMs?: number; hard?: boolean };
 
+/** Today's cap as the governor sees it (settings + DM ramp + any running warm-up plan). The panel shows the same thing. */
+export async function currentCap(now = Date.now()): Promise<CapInfo> {
+  const [s, w, wd] = await Promise.all([getSettings(), get('warmup'), get('warmupDaily')]);
+  return dmCap(s, w, wd?.karma ?? null, now);
+}
+
 export async function checkDm(): Promise<Gate> {
   const [s, d] = await Promise.all([getSettings(), getDaily()]);
   const now = Date.now();
-  if (d.pausedUntil > now) {
-    return { ok: false, hard: true, reason: `Paused until ${new Date(d.pausedUntil).toLocaleTimeString()} (Reddit pushed back earlier)` };
+  const cap = await currentCap(now);
+  const b = dmBlock(s, d, cap, now);
+  if (b) {
+    // keep the wording the log has always used for the plan case
+    const reason = b.kind === 'plan' ? `Warm-up plan: no DMs in "${cap.phase}" (day ${cap.day})` : b.kind === 'paused' ? `${b.text} (Reddit pushed back earlier)` : b.text;
+    return { ok: false, hard: true, reason };
   }
-  if (!inActiveHours(s)) return { ok: false, hard: true, reason: `Outside active hours (${s.activeStart}:00–${s.activeEnd}:00)` };
-  const cap = effectiveCap(s, now);
-  if (d.count >= cap) return { ok: false, hard: true, reason: `Daily cap reached (${d.count}/${cap})` };
   if (d.nextDmAt > now) return { ok: false, reason: 'Waiting between DMs', waitMs: d.nextDmAt - now };
   return { ok: true };
 }
@@ -49,4 +47,6 @@ export async function recordDm(): Promise<void> {
   await patchDaily({ count: d.count + 1, nextDmAt: Date.now() + nextGapMs(s) });
 }
 
-export const pauseFor = (ms: number) => patchDaily({ pausedUntil: Date.now() + ms });
+export const pauseFor = (ms: number, reason = '') => patchDaily({ pausedUntil: Date.now() + ms, pauseReason: reason });
+/** "Resume now" on the status banner. */
+export const resumeDms = () => patchDaily({ pausedUntil: 0, pauseReason: '' });

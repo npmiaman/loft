@@ -93,6 +93,18 @@ async function upvote(scope: 'post' | 'comment', permalink?: string): Promise<{ 
   return { ok: true };
 }
 
+// ------------------------------------------------------------------ join a subreddit
+async function join(): Promise<{ ok: boolean; already?: boolean }> {
+  const state = await waitFor(() => findClickables(/^(join|joined)$/i, '')[0], 7000);
+  if (!state) return { ok: false };
+  if (/^joined$/i.test((state.innerText || '').trim()) || /^joined\b/i.test(state.getAttribute('aria-label') ?? '')) return { ok: true, already: true };
+  await cursor.linger(t(900, 0.5));
+  await cursor.click(state);
+  await sleep(t(900, 0.5));
+  const joined = await waitFor(() => findClickables(/^joined$/i, '')[0], 4000);
+  return joined ? { ok: true } : { ok: false };
+}
+
 // ------------------------------------------------------------------ DM
 const RATE = /(you'?re|you are) doing that too much|rate.?limit|try again (later|in)|too many (messages|requests)/i;
 const BLOCK = /(can'?t|cannot|unable to) (send|message|chat)|isn'?t accepting|has blocked you|not accepting (messages|chats)|only (accepts|allows)/i;
@@ -215,6 +227,110 @@ async function postComment(text: string): Promise<{ ok: boolean; error?: string 
   return cleared ? { ok: true } : { ok: false, error: 'Comment did not post' };
 }
 
+// ------------------------------------------------------------------ submit a text post
+const SUBMIT_ERRORS = [
+  /(this community|r\/\w+) requires? (a )?(post )?flair/i, /(add|select|choose) (a )?flair/i,
+  /you'?re doing that too much|try again (later|in)|rate.?limit/i,
+  /(not allowed|isn'?t allowed|can'?t|cannot|unable to) (post|submit)/i, /(banned|restricted|muted) (from|in)/i,
+  /must be approved|requires? approval/i, /title.{0,20}(required|too (short|long)|must)/i,
+  /(post|submission).{0,30}(removed|rejected)/i, /captcha|verify (that )?you'?re (a )?human/i,
+];
+const hintOf = (el: HTMLElement) =>
+  `${el.getAttribute('placeholder') ?? ''} ${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('name') ?? ''} ${el.getAttribute('data-placeholder') ?? ''}`;
+
+/** What the page is complaining about (flair required, rate limit, ...), for when a submit didn't go through. */
+function submitErrors(): string[] {
+  const text = pageText();
+  return [...new Set(SUBMIT_ERRORS.map((re) => text.match(re)?.[0]).filter((x): x is string => !!x))];
+}
+
+function findTitleField(): HTMLElement | null {
+  const c = (deepQueryAll('textarea, input[type="text"], input:not([type]), [contenteditable="true"], [role="textbox"]') as HTMLElement[]).filter(isVisible);
+  return c.find((el) => /title/i.test(hintOf(el))) ?? null;
+}
+
+function findBodyEditor(title: HTMLElement): HTMLElement | null {
+  const c = (deepQueryAll('[contenteditable="true"], [role="textbox"], textarea') as HTMLElement[]).filter(isVisible).filter((el) => el !== title && !/title/i.test(hintOf(el)));
+  return c.find((el) => /body|text|content|description|optional/i.test(hintOf(el))) ?? c[c.length - 1] ?? null;
+}
+
+/** Fill in and press "Post" on a subreddit's submit page. Success is the redirect to the new thread, which the caller watches. */
+async function submitPost(title: string, body: string): Promise<{ ok: boolean; code?: string; error?: string; errors?: string[] }> {
+  if (/captcha|verify (that )?you'?re (a )?human/i.test(pageText())) return { ok: false, code: 'captcha', error: 'Captcha shown' };
+  const titleEl = await waitFor(findTitleField, 12000, 400);
+  if (!titleEl) return { ok: false, code: 'no-title', error: 'Title field not found (is this a submit page, and is the subreddit open to you?)' };
+  await sleep(t(900, 0.5));
+  await cursor.click(titleEl);
+  await sleep(t(500, 0.5));
+  await typeInto(titleEl, title, 'field');
+  await sleep(clamp(t(900 + title.length * 12, 0.5), 600, 6000));
+
+  if (body.trim()) {
+    const editor = await waitFor(() => findBodyEditor(titleEl), 6000, 300);
+    if (!editor) return { ok: false, code: 'no-body', error: 'Body editor not found (does this subreddit allow text posts?)' };
+    await cursor.click(editor);
+    await sleep(t(600, 0.5));
+    await typeInto(editor, body, 'comment');
+    await sleep(clamp(t(2000 + body.length * 18, 0.5), 1200, 16000)); // proofread
+  }
+
+  const post = await waitFor(() => findClickables(/^post$/i, '').pop(), 6000, 300);
+  if (!post) return { ok: false, code: 'no-post-button', error: 'Post button not found' };
+  const disabled = () => (post as HTMLButtonElement).disabled || post.getAttribute('aria-disabled') === 'true';
+  if (disabled()) await waitFor(() => !disabled(), 4000, 300); // some pages enable it a moment after typing
+  if (disabled()) return { ok: false, code: 'disabled', error: 'The Post button is disabled', errors: submitErrors() };
+  await cursor.click(post);
+  return { ok: true };
+}
+
+// ------------------------------------------------------------------ doctor: read-only checks of Reddit's markup
+interface Check { name: string; ok: boolean; detail: string }
+
+/**
+ * Does this page look the way Pigeon expects? Reads only: never types, clicks or sends. The caller visits a feed, a post,
+ * a profile, the chat list and the submit page and runs this on each, so a Reddit markup change shows up as one clearly
+ * named failure instead of a mystery halfway through a session.
+ */
+function probePage(kind: string) {
+  const checks: Check[] = [];
+  const add = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail });
+  const posts = readPosts();
+  const sample: Record<string, unknown> = {};
+
+  add('logged in (no "Log In" button)', findClickables(/^log ?in$/i, '').length === 0);
+
+  if (kind === 'feed' || kind === 'post') {
+    const raw = deepQueryAll('shreddit-post').length + document.querySelectorAll('.thing.link').length;
+    add('post elements (<shreddit-post>)', raw > 0, `${raw} found`);
+    const bad = posts.filter((p) => !p.author || !p.title || !p.permalink).length;
+    add('posts parse (author, title, permalink)', posts.length > 0 && bad === 0, `${posts.length} parsed${bad ? `, ${bad} missing a field` : ''}`);
+    if (posts[0]) Object.assign(sample, { author: posts[0].author, title: posts[0].title.slice(0, 60), permalink: posts[0].permalink, subreddit: posts[0].subreddit });
+    const up = (deepQueryAll('button[upvote], [aria-label="Upvote"], button[aria-label*="pvote" i]') as HTMLElement[]).filter(isVisible);
+    add('upvote button', up.length > 0, `${up.length} visible`);
+  }
+  if (kind === 'post') {
+    const comments = readComments();
+    add('comments parse', comments.length > 0 || /no comments yet/i.test(pageText()), `${comments.length} parsed`);
+    add('comment box', !!(deepQueryAll('faceplate-textarea-input, [placeholder*="conversation" i], comment-composer-host, [data-test-id="comment-composer"]') as HTMLElement[]).find(isVisible));
+  }
+  if (kind === 'profile') {
+    add('profile exists', !/page not found|this account has been suspended|nobody on reddit goes by that name/i.test(pageText()));
+    add('chat / message button', !!(findClickables(/^(start chat|chat|message|send message)$/i)[0] ?? findClickables(/\b(start (a )?chat|send (a )?message)\b/i)[0]));
+  }
+  if (kind === 'chat') {
+    const rooms = scanInbox();
+    add('chat rooms list', rooms.length > 0, `${rooms.length} rooms, ${rooms.filter((r) => r.unread).length} unread`);
+    sample.rooms = rooms.slice(0, 3).map((r) => r.text.slice(0, 70));
+  }
+  if (kind === 'submit') {
+    const title = findTitleField();
+    add('title field', !!title);
+    add('body editor', !!(title && findBodyEditor(title)));
+    add('Post button', findClickables(/^post$/i, '').length > 0);
+  }
+  return { ok: true, kind, url: location.href, checks, sample };
+}
+
 // ------------------------------------------------------------------ scan (Page DMer) + inbox
 function scanPage() {
   const out: { username: string; subreddit: string; postUrl: string; postTitle: string; snippet: string }[] = [];
@@ -238,6 +354,47 @@ function scanInbox() {
   return rooms;
 }
 
+/** Run one command from the extension (or, in the test-only build, from a test page). Never throws: errors come back as {ok:false}. */
+async function handle(msg: any): Promise<unknown> {
+  if (msg.cmd === 'abort') {
+    setAborted(true);
+    cursor.hud('');
+    return { ok: true };
+  }
+  setAborted(false);
+  try {
+    switch (msg.cmd) {
+      case 'ping': return { ok: true, url: location.href };
+      case 'url': return { ok: true, url: location.href };
+      case 'hud': cursor.hud(msg.text ?? ''); return { ok: true };
+      case 'idleClick': return { ok: await cursor.idleClick() };
+      case 'moveCursor': await cursor.moveTo(msg.x, msg.y); return { ok: true };
+      case 'clickSelector': { // diagnostics: click a matching element with the human cursor
+        const el = deepQueryAll(msg.selector).find(isVisible);
+        if (!el) return { ok: false };
+        await cursor.click(el);
+        return { ok: true };
+      }
+      case 'typoLog': return { ok: true, log: typoLog.splice(0) };
+      case 'browse': return { ok: true, posts: await browse(msg.maxPosts ?? 25, msg.seconds ?? 35) };
+      case 'readPost': return { ok: true, ...(await readPost()) };
+      case 'clickLink': return clickLinkAsync(msg.hrefIncludes);
+      case 'upvote': return upvote(msg.scope, msg.permalink);
+      case 'join': return join();
+      case 'dm': return dm(msg.text);
+      case 'postComment': return postComment(msg.text);
+      case 'submitPost': return submitPost(msg.title, msg.body ?? '');
+      case 'submitErrors': return { ok: true, errors: submitErrors() };
+      case 'probe': return probePage(msg.kind);
+      case 'scanPage': return { ok: true, items: scanPage() };
+      case 'scanInbox': return { ok: true, rooms: scanInbox() };
+      default: return { ok: false, error: 'unknown command ' + msg.cmd };
+    }
+  } catch (e) {
+    return { ok: false, aborted: e instanceof AbortError, error: String((e as Error)?.message ?? e) };
+  }
+}
+
 // ------------------------------------------------------------------ wiring
 export default defineContentScript({
   matches: ['*://*.reddit.com/*'],
@@ -251,41 +408,17 @@ export default defineContentScript({
 
     chrome.runtime.onMessage.addListener((msg, _sender, send) => {
       if (msg?.target !== 'page') return;
-      if (msg.cmd === 'abort') {
-        setAborted(true);
-        cursor.hud('');
-        send({ ok: true });
-        return;
-      }
-      setAborted(false);
-      (async () => {
-        switch (msg.cmd) {
-          case 'ping': return { ok: true, url: location.href };
-          case 'url': return { ok: true, url: location.href };
-          case 'hud': cursor.hud(msg.text ?? ''); return { ok: true };
-          case 'idleClick': return { ok: await cursor.idleClick() };
-          case 'moveCursor': await cursor.moveTo(msg.x, msg.y); return { ok: true };
-          case 'clickSelector': { // diagnostics: click a matching element with the human cursor
-            const el = deepQueryAll(msg.selector).find(isVisible);
-            if (!el) return { ok: false };
-            await cursor.click(el);
-            return { ok: true };
-          }
-          case 'typoLog': return { ok: true, log: typoLog.splice(0) };
-          case 'browse': return { ok: true, posts: await browse(msg.maxPosts ?? 25, msg.seconds ?? 35) };
-          case 'readPost': return { ok: true, ...(await readPost()) };
-          case 'clickLink': return clickLinkAsync(msg.hrefIncludes);
-          case 'upvote': return upvote(msg.scope, msg.permalink);
-          case 'dm': return dm(msg.text);
-          case 'postComment': return postComment(msg.text);
-          case 'scanPage': return { ok: true, items: scanPage() };
-          case 'scanInbox': return { ok: true, rooms: scanInbox() };
-          default: return { ok: false, error: 'unknown command ' + msg.cmd };
-        }
-      })()
-        .then(send)
-        .catch((e) => send({ ok: false, aborted: e instanceof AbortError, error: String(e?.message ?? e) }));
+      handle(msg).then(send);
       return true;
     });
+
+    // Test-only build (`wxt build -m testbridge`): lets a test page run commands in the REAL extension content-script world, so
+    // Firefox's sandbox can be exercised without driving the extension's own pages. Compiled out of every normal build.
+    if (import.meta.env.MODE === 'testbridge') {
+      window.addEventListener('message', (e) => {
+        if (e.source !== window || e.data?.__pigeonTest !== 'cmd') return;
+        handle({ ...e.data.msg, target: 'page' }).then((res) => window.postMessage({ __pigeonTest: 'res', id: e.data.id, res: JSON.parse(JSON.stringify(res ?? null)) }, '*'));
+      });
+    }
   },
 });

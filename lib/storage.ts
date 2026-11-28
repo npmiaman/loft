@@ -1,5 +1,7 @@
+import { contactedAfterClear, migrateSettings, unsentLeadKeys } from './safety';
 import type {
   AgentState, Daily, Lead, LogLine, Opportunity, PostIdea, Product, Settings, Subreddit, Template,
+  WarmupDaily, WarmupItem, WarmupState,
 } from './types';
 
 export const DEFAULT_TEMPLATE: Template = {
@@ -27,7 +29,6 @@ export const DEFAULT_SETTINGS: Settings = {
   upvotes: true,
   maxUpvotesPerSession: 10,
   dmMode: 'ai',
-  approveAiDrafts: true,
   aiGuidance: '',
   autoSchedule: false,
   sessionsPerDay: 3,
@@ -42,6 +43,8 @@ export const EMPTY_AGENT: AgentState = {
   stats: { scanned: 0, leads: 0, upvotes: 0, dms: 0, errors: 0 },
 };
 
+export const EMPTY_WARMUP: WarmupState = { enabled: false, startedAt: 0, docs: [], plan: null, approval: 'review' };
+
 export interface KV {
   settings: Settings;
   product: Product | null;
@@ -52,6 +55,12 @@ export interface KV {
   log: LogLine[];
   daily: Daily;
   agent: AgentState;
+  warmup: WarmupState;
+  warmupJoined: string[]; // subreddits the warm-up already joined, lowercase (written by the background only)
+  warmupDaily: WarmupDaily | null;
+  warmupItems: WarmupItem[];
+  onboarded: boolean; // first-run checklist finished
+  contacted: string[]; // lowercase usernames already DMed. Clearing leads never removes anyone from it.
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -66,6 +75,12 @@ const DEFAULTS: KV = {
   log: [],
   daily: { date: today(), count: 0, sessions: 0, nextDmAt: 0, pausedUntil: 0 },
   agent: EMPTY_AGENT,
+  warmup: EMPTY_WARMUP,
+  warmupJoined: [],
+  warmupDaily: null,
+  warmupItems: [],
+  onboarded: false,
+  contacted: [],
 };
 
 export async function get<K extends keyof KV>(key: K): Promise<KV[K]> {
@@ -78,7 +93,7 @@ export async function set<K extends keyof KV>(key: K, value: KV[K]): Promise<voi
 }
 
 export async function getSettings(): Promise<Settings> {
-  return { ...DEFAULT_SETTINGS, ...(await get('settings')) };
+  return migrateSettings(await get('settings'));
 }
 
 export async function getDaily(): Promise<Daily> {
@@ -123,9 +138,26 @@ export async function listLeads(): Promise<Lead[]> {
     .sort((a, b) => b.fit - a.fit || b.createdAt - a.createdAt);
 }
 
-export async function clearLeads(): Promise<void> {
-  const all = await chrome.storage.local.get(null);
-  await chrome.storage.local.remove(Object.keys(all).filter((k) => k.startsWith(LEAD)));
+/** Everyone already messaged: the persistent set plus any lead marked sent/replied (covers data from before the set existed). */
+export async function getContacted(): Promise<Set<string>> {
+  return contactedAfterClear(await get('contacted'), await listLeads());
+}
+
+/** True if this person is already a lead or was messaged before (even if their lead was cleared since). */
+export async function isKnown(username: string): Promise<boolean> {
+  return !!(await getLead(username)) || (await getContacted()).has(username.toLowerCase());
+}
+
+export async function markContacted(username: string): Promise<void> {
+  const cur = await get('contacted');
+  if (!cur.includes(username.toLowerCase())) await set('contacted', [...cur, username.toLowerCase()]);
+}
+
+/** Remove leads. `unsentOnly` keeps sent/replied leads. Either way, everyone already messaged stays in the contacted set. */
+export async function clearLeads(unsentOnly = false): Promise<void> {
+  const leads = await listLeads();
+  await set('contacted', [...contactedAfterClear(await get('contacted'), leads)]);
+  await chrome.storage.local.remove(unsentOnly ? unsentLeadKeys(leads) : leads.map((l) => leadKey(l.username)));
 }
 
 // ---- log (written by background only) ----
